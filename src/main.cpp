@@ -1,17 +1,25 @@
 #include <iostream>
 #include "EquationTypes.hpp"
+#include "Demorgan.hpp"
 
 int main() {
-    std::cout << "Hello, World!" << std::endl;
-
     EqVar A("A");
     EqVar B("B");
     EqVar C("C");
+    EqVar D("D");
 
-    // This will now compile and build the nested AST successfully!
-    auto expressionRoot = (A + B) + C;
+    // Build your expression tree
+    Node root = (A + B) * (C * D);
 
-    std::cout << "\nGenerated AST Structure:\n";
-    walk_ast(&expressionRoot);
+    std::cout << "--- BEFORE De Morgan ---\n";
+    walk_ast(&root);
+
+    // Run De Morgan transformation
+    Demorgan demorgan(&root);
+    demorgan.get_pos();
+
+    std::cout << "\n--- AFTER De Morgan ---\n";
+    walk_ast(&root);
+
     return 0;
 }

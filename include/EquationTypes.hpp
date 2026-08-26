@@ -13,7 +13,6 @@ enum class opType {
     Var
 };
 
-// Forward declaration so Node knows EqVar exists
 struct EqVar;
 
 struct Node {
@@ -21,8 +20,26 @@ struct Node {
     std::string name = ""; 
     std::vector<Node> children;
 
-    // Node + EqVar chaining support
+    // Overloads for EqVar on the right
     Node operator+(const EqVar& rhs) const;
+    Node operator*(const EqVar& rhs) const;
+
+    // Overloads for Node on the right (Fixes the current error!)
+    Node operator+(const Node& rhs) const {
+        Node n;
+        n.op = opType::Or;
+        n.children.push_back(*this);
+        n.children.push_back(rhs);
+        return n;
+    }
+
+    Node operator*(const Node& rhs) const {
+        Node n;
+        n.op = opType::And;
+        n.children.push_back(*this);
+        n.children.push_back(rhs);
+        return n;
+    }
 };
 
 struct EqVar {
@@ -41,37 +58,67 @@ struct EqVar {
         n.children.push_back(rhs.toNode());
         return n;
     }
+
+    Node operator*(const EqVar& rhs) const {
+        Node n;
+        n.op = opType::And; 
+        n.children.push_back(this->toNode());
+        n.children.push_back(rhs.toNode());
+        return n;
+    }
+
+    // Allow EqVar + Node as well, just in case
+    Node operator+(const Node& rhs) const {
+        Node n;
+        n.op = opType::Or;
+        n.children.push_back(this->toNode());
+        n.children.push_back(rhs);
+        return n;
+    }
+
+    Node operator*(const Node& rhs) const {
+        Node n;
+        n.op = opType::And;
+        n.children.push_back(this->toNode());
+        n.children.push_back(rhs);
+        return n;
+    }
 };
 
-// Now implement Node + EqVar down here where EqVar is fully defined
+// Implement Node + EqVar
 inline Node Node::operator+(const EqVar& rhs) const {
     Node n;
     n.op = opType::Or;
-    n.children.push_back(*this); // 'this' node is already a Node!
+    n.children.push_back(*this);
     n.children.push_back(rhs.toNode());
     return n;
 }
 
-void walk_ast(const Node* n, int depth = 0) {
+inline Node Node::operator*(const EqVar& rhs) const {
+    Node n;
+    n.op = opType::And;
+    n.children.push_back(*this);
+    n.children.push_back(rhs.toNode());
+    return n;
+}
+
+// AST Walker function
+inline void walk_ast(const Node* n, int depth = 0) {
     if (!n) return;
 
-    // Create an indentation string based on depth for nice visual hierarchy
     std::string indent(depth * 2, ' ');
 
-    // Check what kind of node it is
     if (n->op == opType::Var) {
         std::cout << indent << "Variable: " << n->name << "\n";
     } else {
-        // Print the operator type
         std::string opName = "";
         if (n->op == opType::Or) opName = "OR (+)";
-        else if (n->op == opType::And) opName = "AND";
+        else if (n->op == opType::And) opName = "AND (*)";
         else if (n->op == opType::Not) opName = "NOT";
         else opName = "NONE";
 
         std::cout << indent << "Operator: " << opName << "\n";
 
-        // Recursively walk all children
         for (const auto& child : n->children) {
             walk_ast(&child, depth + 1);
         }
