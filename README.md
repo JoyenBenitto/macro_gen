@@ -1,2 +1,11 @@
 # macro_gen
-Genearte digital IC macros
+
+Generates digital IC macros from boolean equations to ngspice netlis
+
+# Building the source
+
+```bash
+$ git clone https://github.com/JoyenBenitto/macro_gen.git
+$ chmod +x configure.sh
+$ ./configure.sh
+```
