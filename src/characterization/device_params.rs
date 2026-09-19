@@ -8,7 +8,7 @@ const EPS0: f64 = 8.854e-12;
 /// Instance-level operating-point outputs retrievable as clean vectors via
 /// `let x = @<instance>[<param>]` + `ngGet_Vec_Info`.
 const VECTOR_PARAMS: &[&str] = &[
-    "vth", "gm", "cgg", "cgs", "cgd", "cdb", "csb", "vgsteff", "weff", "leff",
+    "vth", "id", "gm", "cgg", "cgs", "cgd", "cdb", "csb", "vgsteff", "weff", "leff",
 ];
 
 /// Model-level static params only obtainable as text from `showmod`; no
@@ -18,6 +18,17 @@ const SHOWMOD_PARAMS: &[&str] = &["u0", "vsat", "toxe", "epsrox"];
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DeviceParams {
     pub vth: f64,
+    /// Drain current at the characterization bias — real simulated BSIM
+    /// output, unlike `u0` below (see its doc comment).
+    pub id: f64,
+    /// Raw per-bin BSIM model-card fit parameter, *not* the true
+    /// bias-dependent effective mobility: BSIM combines it with additional
+    /// degradation terms (ua/ub/uc etc.) internally to get the real
+    /// mobility used in simulation, which only shows up in measured
+    /// outputs like `id`/`gm`. Confirmed on this PDK: raw nmos.u0/pmos.u0
+    /// gave a ~53x ratio, while the actually-simulated id/gm ratio was
+    /// ~2.3-2.7x (sky130's expected range) — so sizing formulas should
+    /// prefer `id`/`gm` over `u0` wherever possible.
     pub u0: f64,
     pub vsat: f64,
     pub toxe: f64,
@@ -39,9 +50,10 @@ pub struct DeviceParams {
 
 impl DeviceParams {
     /// (name, value) pairs in a stable order, for CSV output.
-    pub fn as_named_fields(&self) -> [(&'static str, f64); 16] {
+    pub fn as_named_fields(&self) -> [(&'static str, f64); 17] {
         [
             ("vth", self.vth),
+            ("id", self.id),
             ("u0", self.u0),
             ("vsat", self.vsat),
             ("toxe", self.toxe),
@@ -177,6 +189,7 @@ pub fn extract(session: &NgspiceSession, instance_path: &str) -> Result<DevicePa
 fn assign_vector_param(params: &mut DeviceParams, name: &str, value: f64) {
     match name {
         "vth" => params.vth = value,
+        "id" => params.id = value,
         "gm" => params.gm = value,
         "cgg" => params.cgg = value,
         "cgs" => params.cgs = value,

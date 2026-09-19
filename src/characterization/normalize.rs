@@ -1,6 +1,8 @@
 use crate::characterization::device_params::{self, DeviceParams, ExtractError};
 use crate::characterization::ngspice_ffi::{FfiError, NgspiceSession};
+use crate::characterization::paths::BuildLayout;
 use crate::config::Config;
+use log::{debug, warn};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
@@ -21,10 +23,25 @@ pub enum NormalizeError {
 /// each into saturation on their own terms (independent gate/drain sources,
 /// not the inverter's shared-gate connectivity), sized from
 /// `config.reference_inverter`.
-fn write_characterization_netlist(config: &Config, build_dir: &Path) -> std::io::Result<std::path::PathBuf> {
+fn write_characterization_netlist(config: &Config, project_dir: &Path) -> std::io::Result<std::path::PathBuf> {
     let vdd = config.environment.vdd;
     let vdd_half = vdd / 2.0;
     let ri = &config.reference_inverter;
+    // Wp isn't known yet at this stage (it's what the sizing sweep later
+    // solves for); nmos_w is a reasonable starting guess purely for biasing
+    // this throwaway characterization deck.
+    warn!(
+        "characterization deck: assuming Wp = nmos_w ({:.4}um) for bias purposes only; the real Wp is solved for later",
+        ri.nmos_w
+    );
+    let pmos_w = ri.nmos_w;
+    if ri.pmos_l.is_none() {
+        warn!(
+            "reference_inverter.pmos_l not set; assuming Lp = nmos_l ({:.4}um) for the characterization deck",
+            ri.nmos_l
+        );
+    }
+    let pmos_l = ri.pmos_l_or_default();
 
     let netlist = format!(
         "* throwaway deck for device-parameter extraction; not for user inspection\n\
@@ -46,23 +63,22 @@ fn write_characterization_netlist(config: &Config, build_dir: &Path) -> std::io:
         nmos_w = ri.nmos_w,
         nmos_l = ri.nmos_l,
         pmos_model = config.models.pmos,
-        pmos_w = ri.pmos_w,
-        pmos_l = ri.pmos_l,
+        pmos_w = pmos_w,
+        pmos_l = pmos_l,
         include_path = config.environment.include_path,
         corner = config.environment.corner,
     );
 
-    fs::create_dir_all(build_dir)?;
-    let path = build_dir.join("characterize.spice");
+    let path = project_dir.join("characterize.spice");
     fs::write(&path, netlist)?;
     Ok(path)
 }
 
 fn write_csv(
-    build_dir: &Path,
+    project_dir: &Path,
     params_by_device: &HashMap<String, DeviceParams>,
 ) -> std::io::Result<()> {
-    let path = build_dir.join("device_params.csv");
+    let path = project_dir.join("device_params.csv");
     let mut file = fs::File::create(&path)?;
     writeln!(file, "device,param,value")?;
 
@@ -80,12 +96,19 @@ fn write_csv(
 
 /// Runs the normalize stage: extracts BSIM device parameters via FFI to
 /// libngspice for the nmos and pmos in `config.reference_inverter`'s
-/// sizing, dumps them to `build_dir/device_params.csv` for visibility, and
-/// returns them keyed by "nmos"/"pmos" for in-process use by later stages.
-pub fn run(config: &Config, build_dir: &Path) -> Result<HashMap<String, DeviceParams>, NormalizeError> {
-    let deck_path = write_characterization_netlist(config, build_dir)?;
+/// sizing, dumps them to `build_dir/.macro_gen_project/device_params.csv`
+/// for visibility, and returns them keyed by "nmos"/"pmos" for in-process
+/// use by later stages.
+/// Reuses the process-wide `session` rather than starting its own, since
+/// `ngSpice_Init` is meant to be called once per process.
+pub fn run(
+    config: &Config,
+    build_dir: &Path,
+    session: &NgspiceSession,
+) -> Result<HashMap<String, DeviceParams>, NormalizeError> {
+    let layout = BuildLayout::new(build_dir)?;
+    let deck_path = write_characterization_netlist(config, &layout.project_dir)?;
 
-    let session = NgspiceSession::start()?;
     session.command(&format!("source {}", deck_path.display()))?;
 
     let nmos_instance = format!("m.xnmos.m{}", config.models.nmos.to_lowercase());
@@ -94,11 +117,20 @@ pub fn run(config: &Config, build_dir: &Path) -> Result<HashMap<String, DevicePa
     let nmos_params = device_params::extract(&session, &nmos_instance)?;
     let pmos_params = device_params::extract(&session, &pmos_instance)?;
 
+    debug!(
+        "nmos: vth={:.4}V id={:.4e}A u0={:.4} gm={:.4e}",
+        nmos_params.vth, nmos_params.id, nmos_params.u0, nmos_params.gm
+    );
+    debug!(
+        "pmos: vth={:.4}V id={:.4e}A u0={:.4} gm={:.4e}",
+        pmos_params.vth, pmos_params.id, pmos_params.u0, pmos_params.gm
+    );
+
     let mut params_by_device = HashMap::new();
     params_by_device.insert("nmos".to_string(), nmos_params);
     params_by_device.insert("pmos".to_string(), pmos_params);
 
-    write_csv(build_dir, &params_by_device)?;
+    write_csv(&layout.project_dir, &params_by_device)?;
 
     Ok(params_by_device)
 }

@@ -13,7 +13,10 @@ pmos = "sky130_fd_pr__pfet_01v8"
 [reference_inverter]
 name = "sky130_fd_pr__inv_1"
 nmos_w = 0.42
-pmos_w = 0.42
 nmos_l = 0.15
 pmos_l = 0.15
 inverter_threshold = 0.9
+wl_sweep_granularity = 0.42
+wl_sweep_sample_count = 10
+# w_is_multiple_of_w_min = true
+# l_is_multiple_of_l_min = true

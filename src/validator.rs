@@ -3,7 +3,7 @@ use std::path::Path;
 use thiserror::Error;
 
 const ALLOWED_CORNERS: &[&str] = &["tt", "ff", "ss", "sf", "fs"];
-const MAX_SANE_VDD: f64 = 10.0;
+const MAX_SANE_VDD: f64 = 1000.0;
 
 #[derive(Debug, Error)]
 pub enum ValidationError {
@@ -30,6 +30,14 @@ pub enum ValidationError {
         "reference_inverter.inverter_threshold = {0} must lie strictly between 0 and environment.vdd = {1}"
     )]
     InverterThresholdOutOfRange(f64, f64),
+    #[error("reference_inverter.wl_sweep_granularity must be positive, got {0}")]
+    WlSweepGranularityNotPositive(f64),
+    #[error(
+        "reference_inverter.wl_sweep_granularity = {0} is smaller than environment.min_width = {1}, but w_is_multiple_of_w_min is set — every swept candidate would quantize back to the same width"
+    )]
+    WlSweepGranularityBelowMinWidth(f64, f64),
+    #[error("reference_inverter.wl_sweep_sample_count must be greater than zero")]
+    WlSweepSampleCountZero,
 }
 
 #[derive(Debug, Error)]
@@ -92,19 +100,15 @@ pub fn validate(config: &Config) -> Result<(), ValidationErrors> {
             "nmos_w", "min_width", ri.nmos_w, min_width,
         ));
     }
-    if ri.pmos_w < min_width {
-        errors.push(ValidationError::InverterMosSizeTooSmall(
-            "pmos_w", "min_width", ri.pmos_w, min_width,
-        ));
-    }
     if ri.nmos_l < min_length {
         errors.push(ValidationError::InverterMosSizeTooSmall(
             "nmos_l", "min_length", ri.nmos_l, min_length,
         ));
     }
-    if ri.pmos_l < min_length {
+    let pmos_l = ri.pmos_l_or_default();
+    if pmos_l < min_length {
         errors.push(ValidationError::InverterMosSizeTooSmall(
-            "pmos_l", "min_length", ri.pmos_l, min_length,
+            "pmos_l", "min_length", pmos_l, min_length,
         ));
     }
 
@@ -113,6 +117,23 @@ pub fn validate(config: &Config) -> Result<(), ValidationErrors> {
             ri.inverter_threshold,
             config.environment.vdd,
         ));
+    }
+
+    if let Some(granularity) = ri.wl_sweep_granularity {
+        if granularity <= 0.0 {
+            errors.push(ValidationError::WlSweepGranularityNotPositive(granularity));
+        } else if ri.w_is_multiple_of_w_min && granularity < min_width {
+            errors.push(ValidationError::WlSweepGranularityBelowMinWidth(
+                granularity,
+                min_width,
+            ));
+        }
+    }
+
+    if let Some(count) = ri.wl_sweep_sample_count {
+        if count == 0 {
+            errors.push(ValidationError::WlSweepSampleCountZero);
+        }
     }
 
     // Return the result of the validation

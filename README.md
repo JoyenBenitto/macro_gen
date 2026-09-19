@@ -1,6 +1,6 @@
 # macro_gen
 
-Generates digital IC macros from boolean equations to ngspice netlis
+Macro_gen is an automated digital IC macro generator
 
 # Building the source
 
