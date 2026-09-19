@@ -6,6 +6,4 @@ Generates digital IC macros from boolean equations to ngspice netlis
 
 ```bash
 $ git clone https://github.com/JoyenBenitto/macro_gen.git
-$ chmod +x configure.sh
-$ ./configure.sh
 ```
