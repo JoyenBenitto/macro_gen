@@ -1,0 +1,41 @@
+{# Jinja template for inverter spice file #}
+
+Vin net1 GND {{ vdd }}
+XM1 net1 net1 GND GND {{ model_nmos }} L={{ l }} W={{ w }} nf=1 ad='int((nf+1)/2) * W/nf * 0.29' as='int((nf+2)/2) * W/nf * 0.29'
++ pd='2*int((nf+1)/2) * (W/nf + 0.29)' ps='2*int((nf+2)/2) * (W/nf + 0.29)' nrd='0.29 / W' nrs='0.29 / W' sa=0 sb=0 sd=0 mult=1
+
+.lib {{ include_path }} {{ corner }}
+.GLOBAL GND
+
+.control
+  dc Vin 0 {{ vdd }} 0.01
+
+  let w_val = {{ w }}u
+  let l_val = {{ l }}u
+
+  * Simulation data
+  let ids_sim = -i(vin)
+
+  * Analytical parameters
+  let vgs = v(net1)
+  let vt_n = 0.7
+  let meu_n = 0.025
+  let cox_n = 8.34e-3
+  let vsat_n = 8e4
+
+  let vgt = max(0, vgs - vt_n)
+
+  let EsatL = (vsat_n * l_val) / meu_n
+
+  let vdsat = (vgt * EsatL) / (vgt + EsatL + 1e-12)
+
+  let ids_anal = meu_n * cox_n * (w_val / l_val) * (vgt * vdsat - 0.5 * vdsat^2)
+
+  *computing and printing the error
+  let pct_error = abs((ids_sim - ids_anal) / (ids_sim + 1e-12)) * 100
+  print mean(pct_error)
+
+  plot ids_sim ids_anal vs vgs
+.endc
+
+.end

@@ -8,6 +8,7 @@ use config::Config;
 use log::{error, info};
 use std::fs;
 use std::process::ExitCode;
+use std::path::Path;
 
 const ASCII_ART_LOGO: &str = r#"
  __   __  _______  _______  ______    _______    _______  _______  __    _
@@ -62,7 +63,11 @@ fn main() -> ExitCode {
     info!("Configuration validated successfully.");
 
     // starting the characterization process
-    inverter::logi(&config);
+    let build_dir = Path::new("build");
+    if let Err(e) = inverter::logi(&config, build_dir) {
+        error!("Failed to generate inverter SPICE deck: {}", e);
+        return ExitCode::FAILURE;
+    }
 
     ExitCode::SUCCESS
 }
