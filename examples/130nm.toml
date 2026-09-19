@@ -2,7 +2,7 @@
 [environment]
 vdd = 1.8
 min_length = 0.15 # in microns
-include_path = "/usr/share/pdk/sky130A/libs.tech/ngspice/sky130.lib.spice"
+include_path = "/home/joyenbenitto/pdk/open_pdks/sources/sky130_fd_pr/combined_models/sky130.lib.spice"
 corner = "tt"
 
 [models]
@@ -10,6 +10,4 @@ nmos = "sky130_fd_pr__nfet_01v8"
 pmos = "sky130_fd_pr__pfet_01v8"
 
 [syntax]
-# The templated instantiation string. 
-# Rust calculates W and L, then injects them here.
 device_template = "M{{name}} {{d}} {{g}} {{s}} {{b}} {{model}} w={{w}} l={{l}}"

@@ -75,7 +75,8 @@ pub fn validate(config: &Config) -> Result<(), ValidationErrors> {
     if !missing.is_empty() {
         errors.push(ValidationError::TemplateMissingPlaceholders(missing));
     }
-
+    
+    // Return the result of the validation
     if errors.is_empty() {
         Ok(())
     } else {

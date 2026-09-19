@@ -54,7 +54,7 @@ fn main() -> ExitCode {
     if let Err(errs) = validator::validate(&config) {
         error!("Configuration '{}' failed validation:", args.config);
         for e in &errs.0 {
-            error!("  - {}", e);
+            error!("{}", e);
         }
         return ExitCode::FAILURE;
     }
