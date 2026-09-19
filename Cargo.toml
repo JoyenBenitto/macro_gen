@@ -2,6 +2,9 @@
 name = "macro_gen"
 version = "0.1.0"
 edition = "2024"
+description = "Automated digital IC macro generator"
+license = "MIT"
+repository = "https://github.com/JoyenBenitto/macro_gen"
 
 [dependencies]
 log = "0.4.34"
