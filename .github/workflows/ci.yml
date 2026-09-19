@@ -35,10 +35,32 @@ jobs:
       - name: Test
         run: cargo test --verbose
 
+  changelog-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure CHANGELOG.md was updated
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -qx CHANGELOG.md; then
+            echo "CHANGELOG.md was updated."
+          else
+            echo "::error::CHANGELOG.md was not updated in this PR. Add an entry describing the change."
+            exit 1
+          fi
+
   publish:
     needs: build-and-test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      already_published: ${{ steps.check.outputs.published }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,3 +93,31 @@ jobs:
       - name: Publish to crates.io
         if: steps.check.outputs.published == 'false'
         run: cargo publish --token ${{ secrets.CRATE_IO_SECRET }}
+
+  release:
+    needs: publish
+    if: needs.publish.outputs.already_published == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pulls the section for this version out of CHANGELOG.md (between its
+      # "## [x.y.z]" heading and the next one) to use as the release body.
+      - name: Extract changelog section
+        run: |
+          awk -v ver="${{ needs.publish.outputs.version }}" '
+            $0 ~ "^## \\[" ver "\\]" { flag=1; next }
+            /^## \[/ && flag { flag=0 }
+            flag { print }
+          ' CHANGELOG.md > release_notes.md
+          cat release_notes.md
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.publish.outputs.version }}
+          name: v${{ needs.publish.outputs.version }}
+          body_path: release_notes.md
