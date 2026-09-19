@@ -1,0 +1,19 @@
+[package]
+name = "macro_gen"
+version = "0.1.0"
+edition = "2024"
+description = "Automated digital IC macro generator"
+license = "MIT"
+repository = "https://github.com/JoyenBenitto/macro_gen"
+
+[dependencies]
+log = "0.4.34"
+env_logger = "0.11.11"
+toml = "1.1.6"
+clap = { version = "4.6.7", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+minijinja = "2.24.0"
+
+[build-dependencies]
+pkg-config = "0.3"

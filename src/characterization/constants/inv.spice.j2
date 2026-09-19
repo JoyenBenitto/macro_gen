@@ -1,0 +1,17 @@
+{# Analytical CMOS inverter deck, sized from ngspice-extracted device parameters #}
+
+Vdd VDD GND {{ vdd }}
+Vin net_in GND 0
+
+XMN net_out net_in GND GND {{ model_nmos }} L={{ ln }} W={{ wn }} nf=1 mult=1
+XMP net_out net_in VDD VDD {{ model_pmos }} L={{ lp }} W={{ wp }} nf=1 mult=1
+
+.lib {{ include_path }} {{ corner }}
+.GLOBAL GND
+
+.control
+  dc Vin 0 {{ vdd }} 0.01
+  wrdata {{ vout_sweep_path }} v(net_in) v(net_out)
+.endc
+
+.end

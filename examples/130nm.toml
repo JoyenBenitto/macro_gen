@@ -1,0 +1,22 @@
+# sky130_adapter.toml
+[environment]
+vdd = 1.8
+min_length = 0.15 # in microns
+min_width = 0.42 # in microns
+include_path = "/home/joyenbenitto/pdk/open_pdks/sources/sky130_fd_pr/combined_models/sky130.lib.spice"
+corner = "tt"
+
+[models]
+nmos = "sky130_fd_pr__nfet_01v8"
+pmos = "sky130_fd_pr__pfet_01v8"
+
+[reference_inverter]
+name = "sky130_fd_pr__inv_1"
+nmos_w = 0.42
+nmos_l = 0.15
+pmos_l = 0.15
+inverter_threshold = 0.9
+wl_sweep_granularity = 0.42
+wl_sweep_sample_count = 10
+# w_is_multiple_of_w_min = true
+# l_is_multiple_of_l_min = true
