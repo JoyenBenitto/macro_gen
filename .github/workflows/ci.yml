@@ -61,10 +61,12 @@ jobs:
         id: check
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          published=$(curl -s https://crates.io/api/v1/crates/macro_gen \
-            | jq -r --arg v "$version" '([.versions[]?.num] // []) | any(. == $v)')
+          response=$(curl -s -H "User-Agent: macro_gen-ci (https://github.com/JoyenBenitto/macro_gen)" \
+            https://crates.io/api/v1/crates/macro_gen)
+          published=$(echo "$response" | jq -r --arg v "$version" '([.versions[]?.num] // []) | any(. == $v)' 2>/dev/null || echo false)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "published=$published" >> "$GITHUB_OUTPUT"
+          echo "version=$version published=$published"
 
       - name: Publish to crates.io
         if: steps.check.outputs.published == 'false'
