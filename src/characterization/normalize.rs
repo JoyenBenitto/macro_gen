@@ -20,16 +20,14 @@ pub enum NormalizeError {
 }
 
 /// Writes a throwaway characterization netlist biasing the nmos and pmos
-/// each into saturation on their own terms (independent gate/drain sources,
-/// not the inverter's shared-gate connectivity), sized from
-/// `config.reference_inverter`.
+/// each into saturation on their own terms (independent gate/drain
+/// sources, not the inverter's shared-gate connectivity).
 fn write_characterization_netlist(config: &Config, project_dir: &Path) -> std::io::Result<std::path::PathBuf> {
     let vdd = config.environment.vdd;
     let vdd_half = vdd / 2.0;
     let ri = &config.reference_inverter;
-    // Wp isn't known yet at this stage (it's what the sizing sweep later
-    // solves for); nmos_w is a reasonable starting guess purely for biasing
-    // this throwaway characterization deck.
+    // Wp isn't known yet (the sizing sweep solves for it later); nmos_w is
+    // a reasonable stand-in purely for biasing this throwaway deck.
     warn!(
         "characterization deck: assuming Wp = nmos_w ({:.4}um) for bias purposes only; the real Wp is solved for later",
         ri.nmos_w
@@ -94,13 +92,10 @@ fn write_csv(
     Ok(())
 }
 
-/// Runs the normalize stage: extracts BSIM device parameters via FFI to
-/// libngspice for the nmos and pmos in `config.reference_inverter`'s
-/// sizing, dumps them to `build_dir/.macro_gen_project/device_params.csv`
-/// for visibility, and returns them keyed by "nmos"/"pmos" for in-process
-/// use by later stages.
-/// Reuses the process-wide `session` rather than starting its own, since
-/// `ngSpice_Init` is meant to be called once per process.
+/// Extracts BSIM device parameters for the nmos and pmos via FFI to
+/// libngspice, writes them to `build_dir/.macro_gen_project/device_params.csv`,
+/// and returns them keyed by `"nmos"`/`"pmos"`. Reuses the process-wide
+/// `session` since `ngSpice_Init` should only be called once per process.
 pub fn run(
     config: &Config,
     build_dir: &Path,

@@ -23,7 +23,6 @@ pub enum ValidationError {
     NmosEmpty,
     #[error("models.pmos must not be empty")]
     PmosEmpty,
-    // checks if reference inverter size is greater or equal to the environment defaults
     #[error("reference_inverter.{0} is smaller than environment.{1}: {2} < {3}")]
     InverterMosSizeTooSmall(&'static str, &'static str, f64, f64),
     #[error(
@@ -44,6 +43,8 @@ pub enum ValidationError {
 #[error("configuration failed validation with {} error(s)", .0.len())]
 pub struct ValidationErrors(pub Vec<ValidationError>);
 
+/// Validates `config`, collecting every failing check rather than
+/// stopping at the first one.
 pub fn validate(config: &Config) -> Result<(), ValidationErrors> {
     let mut errors = Vec::new();
 
@@ -136,7 +137,6 @@ pub fn validate(config: &Config) -> Result<(), ValidationErrors> {
         }
     }
 
-    // Return the result of the validation
     if errors.is_empty() {
         Ok(())
     } else {

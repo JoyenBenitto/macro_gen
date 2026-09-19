@@ -127,6 +127,7 @@ pub struct NgspiceSession {
 }
 
 impl NgspiceSession {
+    /// Initializes the shared library. Must only be called once per process.
     pub fn start() -> Result<Self, FfiError> {
         let rc = unsafe {
             ngSpice_Init(
@@ -145,6 +146,7 @@ impl NgspiceSession {
         Ok(NgspiceSession { _private: () })
     }
 
+    /// Sends `cmd` to ngspice, as if typed at its interactive prompt.
     pub fn command(&self, cmd: &str) -> Result<(), FfiError> {
         let c_cmd = CString::new(cmd).map_err(|_| FfiError::NulInCommand(cmd.to_string()))?;
         let rc = unsafe { ngSpice_Command(c_cmd.as_ptr() as *mut c_char) };

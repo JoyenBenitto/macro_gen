@@ -24,7 +24,7 @@ const ASCII_ART_LOGO: &str = r#"
 |_|   |_||__| |__||_______||___|  |_||_______|  |_______||_______||_|  |__|
 "#;
 
-/// Simple program to greet a person
+/// Automated digital IC macro generator
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -65,11 +65,8 @@ fn print_run_summary(elapsed: std::time::Duration) {
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::new().filter_or("MACROGEN_LOG", "info"))
         .format(|buf, record| {
-            // Trim the ISO8601 timestamp's 'T'/'Z' down to a plain
-            // "YYYY-MM-DD HH:MM:SS" — easier to scan than
-            // "YYYY-MM-DDTHH:MM:SSZ". Level keeps env_logger's default
-            // color styling; only the target is overridden to a fixed
-            // "macro_gen" instead of the full module path.
+            // "YYYY-MM-DD HH:MM:SS" instead of ISO8601's "...THH:MM:SSZ",
+            // and a fixed "macro_gen" target instead of the module path.
             let ts = buf.timestamp().to_string();
             let ts = ts.replacen('T', " ", 1);
             let ts = ts.trim_end_matches('Z');
@@ -133,7 +130,6 @@ fn main() -> ExitCode {
     };
     let symbols = SymbolTable::from_device_params(&device_params);
 
-    // starting the characterization process
     match inverter::generate_deck(&config, build_dir, &symbols, &session) {
         Ok((wn, wp)) => {
             info!("Reference inverter sized: Wn={:.4}um, Wp={:.4}um", wn, wp);

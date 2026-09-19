@@ -5,30 +5,24 @@ use thiserror::Error;
 /// Vacuum permittivity, F/m.
 const EPS0: f64 = 8.854e-12;
 
-/// Instance-level operating-point outputs retrievable as clean vectors via
-/// `let x = @<instance>[<param>]` + `ngGet_Vec_Info`.
+/// Instance operating-point outputs, queryable as vectors via
+/// `@<instance>[<param>]` + `ngGet_Vec_Info`.
 const VECTOR_PARAMS: &[&str] = &[
     "vth", "id", "gm", "cgg", "cgs", "cgd", "cdb", "csb", "vgsteff", "weff", "leff",
 ];
 
-/// Model-level static params only obtainable as text from `showmod`; no
-/// vector path exists for these (confirmed interactively against ngspice).
+/// Model-level parameters only available as `showmod` text; no vector path
+/// exists for these.
 const SHOWMOD_PARAMS: &[&str] = &["u0", "vsat", "toxe", "epsrox"];
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DeviceParams {
     pub vth: f64,
-    /// Drain current at the characterization bias — real simulated BSIM
-    /// output, unlike `u0` below (see its doc comment).
+    /// Drain current at the characterization bias.
     pub id: f64,
-    /// Raw per-bin BSIM model-card fit parameter, *not* the true
-    /// bias-dependent effective mobility: BSIM combines it with additional
-    /// degradation terms (ua/ub/uc etc.) internally to get the real
-    /// mobility used in simulation, which only shows up in measured
-    /// outputs like `id`/`gm`. Confirmed on this PDK: raw nmos.u0/pmos.u0
-    /// gave a ~53x ratio, while the actually-simulated id/gm ratio was
-    /// ~2.3-2.7x (sky130's expected range) — so sizing formulas should
-    /// prefer `id`/`gm` over `u0` wherever possible.
+    /// Raw per-bin BSIM fit parameter, not the true effective mobility
+    /// (BSIM applies further degradation terms internally). Prefer `id`
+    /// or `gm` over `u0` for sizing calculations.
     pub u0: f64,
     pub vsat: f64,
     pub toxe: f64,
@@ -74,15 +68,13 @@ impl DeviceParams {
 }
 
 /// Flat, string-keyed view over one or more devices' `DeviceParams`, for
-/// callers (later sizing/codegen stages) that want to look a value up by
-/// symbolic name (e.g. `"nmos.vth"`, `"pmos.cox"`) rather than going
-/// through the typed `DeviceParams` struct field-by-field.
+/// looking up a value by symbolic name (e.g. `"nmos.vth"`) instead of
+/// going through the typed struct field-by-field.
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable(HashMap<String, f64>);
 
 impl SymbolTable {
-    /// Builds a symbol table from a device-name -> DeviceParams map, with
-    /// keys of the form `"<device>.<param>"` (e.g. `"nmos.vth"`).
+    /// Builds a symbol table keyed `"<device>.<param>"` (e.g. `"nmos.vth"`).
     pub fn from_device_params(params_by_device: &HashMap<String, DeviceParams>) -> Self {
         let mut symbols = HashMap::new();
         for (device, params) in params_by_device {
@@ -122,12 +114,9 @@ pub enum ExtractError {
     MissingShowmodParams(String, Vec<&'static str>),
 }
 
-/// Parses `showmod`'s whitespace-formatted `key value` lines, returning a
-/// name -> value map of everything that looks like `<ident> <float>`.
-///
-/// ngspice's shared-library callback prefixes every captured line with
-/// `stdout `/`stderr ` (confirmed interactively), so that prefix is
-/// stripped before the `key value` pattern is matched.
+/// Parses `showmod`'s whitespace-formatted `key value` lines into a
+/// name -> value map. Strips the `stdout `/`stderr ` prefix ngspice's
+/// shared-library callback adds to each captured line before matching.
 pub fn parse_showmod_output(lines: &[String]) -> HashMap<String, f64> {
     let mut values = HashMap::new();
     for line in lines {
@@ -147,6 +136,8 @@ pub fn parse_showmod_output(lines: &[String]) -> HashMap<String, f64> {
     values
 }
 
+/// Runs `op` on the current circuit and extracts `DeviceParams` for the
+/// given device instance (e.g. `"m.xnmos.msky130_fd_pr__nfet_01v8"`).
 pub fn extract(session: &NgspiceSession, instance_path: &str) -> Result<DeviceParams, ExtractError> {
     session.command("op")?;
 

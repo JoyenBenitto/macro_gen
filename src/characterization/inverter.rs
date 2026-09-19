@@ -32,12 +32,10 @@ fn quantize(value: f64, unit: f64, enabled: bool) -> f64 {
     multiples * unit
 }
 
-/// Renders the inverter deck for a given sizing to `out_path`. The
-/// `.control` block's `wrdata` target (`vout_csv_path`) is rendered as an
-/// absolute path, since ngspice (driven in-process via FFI) resolves bare
-/// relative filenames against the host process's cwd, not `out_path`'s
-/// directory — that mismatch is why `vout_sweep.csv` was previously
-/// landing in the repo root instead of the build directory.
+/// Renders the inverter deck for a given sizing to `out_path`. `vout_csv_path`
+/// must be absolute: ngspice (driven in-process via FFI) resolves a bare
+/// relative `wrdata` filename against the host process's cwd, not
+/// `out_path`'s directory.
 fn render_deck(
     config: &Config,
     out_path: &Path,
@@ -77,14 +75,11 @@ fn render_deck(
 /// Measures the Vin=Vout switching threshold of a rendered deck by sourcing
 /// it fresh and running `.meas dc ... WHEN v(net_out)=v(net_in) FALL=1`.
 ///
-/// Deliberately does *not* try to `alter` a live device's W in place:
-/// tested interactively against this PDK, both `alter @<inst>[w]` (subckt
-/// top-level parameter — fails outright, "no such device or model name")
-/// and altering the internal BSIM instance's `w` directly (parses, but
-/// leaves the subckt's derived geometry parameters — nrd/nrs/ad/as, baked
-/// in from the original W — inconsistent, producing "Effective channel
-/// width <= 0"). Regenerating and re-sourcing the whole deck per candidate
-/// is the reliable path for this PDK's subckt-wrapped devices.
+/// Regenerates and re-sources the whole deck per candidate rather than
+/// `alter`ing a live device's W: this PDK's subckt-wrapped MOSFETs don't
+/// support in-place width alteration (neither the subckt-level parameter
+/// nor the internal BSIM instance's `w` can be altered without leaving
+/// geometry parameters like nrd/nrs/ad/as inconsistent).
 fn measure_switching_threshold(
     config: &Config,
     project_dir: &Path,
@@ -104,16 +99,12 @@ fn measure_switching_threshold(
     Ok(vth)
 }
 
-/// Sweeps candidate Wp values around `wp_seed` (step = `wl_sweep_granularity`,
-/// or `min_width` if unset; `wl_sweep_sample_count` total candidates,
-/// centered on the seed), measures each one's actual switching threshold,
-/// and returns the `(wp, measured_vth)` closest to `inverter_threshold`.
-/// Candidates whose measurement fails (e.g. no crossing in the swept
-/// range) are logged and skipped rather than aborting the whole sweep.
-///
-/// `wl_sweep_granularity` below `min_width` while `w_is_multiple_of_w_min`
-/// is set (every candidate would quantize back to the same width) is
-/// rejected in `validator::validate`, not handled here.
+/// Sweeps `wl_sweep_sample_count` candidate Wp values around `wp_seed`
+/// (step = `wl_sweep_granularity`, default `min_width`), measures each
+/// one's actual switching threshold, and returns the `(wp, measured_vth)`
+/// closest to `inverter_threshold`. A candidate whose measurement fails
+/// (e.g. no crossing in the swept range) is logged and skipped rather than
+/// aborting the sweep.
 fn sweep_wp_for_target_vth(
     config: &Config,
     project_dir: &Path,
@@ -162,14 +153,9 @@ fn sweep_wp_for_target_vth(
 
 /// Generates the analytical CMOS inverter deck: seeds the PMOS width from
 /// `id_based_w_l_n_p_ratio`, sweeps around that seed to find the Wp whose
-/// actual simulated switching threshold is closest to
-/// `inverter_threshold`, logs the estimated W/L for both devices, and
-/// returns `(wn, wp)` in microns.
-///
-/// All intermediate/scratch files (per-candidate sweep decks, the sweep's
-/// `vout_sweep.csv`) live under `build_dir/.macro_gen_project/`; only the
-/// final, chosen deck — the reference inverter after all experiments —
-/// lands in `build_dir/spice/inv.spice`.
+/// simulated switching threshold is closest to `inverter_threshold`, and
+/// writes the result to `build_dir/spice/inv.spice`. Returns `(wn, wp)`
+/// in microns.
 pub fn generate_deck(
     config: &Config,
     build_dir: &Path,
@@ -220,22 +206,16 @@ pub fn generate_deck(
     Ok((wn, wp))
 }
 
-/// Returns Wp/Wn as the ratio of the two devices' *actually simulated*
-/// drain currents (`id`) at the normalize stage's characterization bias
-/// (matched W/L for both devices there, so the ratio is directly
-/// meaningful without needing to know that W/L).
+/// Returns Wp/Wn as the ratio of the two devices' simulated drain currents
+/// (`id`) at the normalize stage's characterization bias — both devices
+/// share the same W/L there, so the ratio is meaningful without needing
+/// to know it.
 ///
-/// This used to be reconstructed analytically from the velocity-saturation
-/// square-law model — Id = (u0*cox/2)*(W/L)*(Ec*L/(Ec*L+Vov))*Vov^2 —
-/// using `nmos.u0`/`pmos.u0` from `showmod`. That gave badly wrong results
-/// on sky130: raw `u0` is a per-bin BSIM fit constant, not the real
-/// bias-dependent effective mobility (BSIM applies additional degradation
-/// terms — ua/ub/uc etc. — internally that only show up in simulated
-/// outputs). Measured: nmos.u0/pmos.u0 ratio ≈ 53x, but the actually
-/// simulated id/gm ratio ≈ 2.3-2.7x — sky130's expected ~2-3x range. This
-/// is only a seed for `sweep_wp_for_target_vth` regardless, which measures
-/// the real switching threshold directly, so exactness here matters less
-/// than starting in a physically sane ballpark.
+/// Deliberately uses measured `id`, not a reconstruction from `u0`/`cox`:
+/// raw `u0` is a per-bin BSIM fit constant, not the true effective
+/// mobility, and produces badly wrong ratios. This is only a seed for
+/// `sweep_wp_for_target_vth`, which measures the real switching threshold
+/// directly, so it only needs to be in the right ballpark.
 pub fn id_based_w_l_n_p_ratio(symbols: &SymbolTable) -> f64 {
     let id_n = symbols.get("nmos.id").unwrap_or_else(|| {
         warn!("symbol 'nmos.id' missing from extracted device parameters; assuming 0.0");
