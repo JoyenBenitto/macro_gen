@@ -2,7 +2,8 @@ mod characterization;
 mod config;
 mod validator;
 
-use characterization::inverter;
+use characterization::device_params::SymbolTable;
+use characterization::{inverter, normalize};
 use clap::Parser;
 use config::Config;
 use log::{error, info};
@@ -62,9 +63,25 @@ fn main() -> ExitCode {
 
     info!("Configuration validated successfully.");
 
-    // starting the characterization process
     let build_dir = Path::new("build");
-    if let Err(e) = inverter::logi(&config, build_dir) {
+
+    let device_params = match normalize::run(&config, build_dir) {
+        Ok(params) => params,
+        Err(e) => {
+            error!("Failed to extract device parameters: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+    let symbols = SymbolTable::from_device_params(&device_params);
+    info!(
+        "Extracted {} device parameter symbol(s) (e.g. nmos.vth={:.4}V, pmos.cox={:.4e})",
+        symbols.len(),
+        symbols.get("nmos.vth").unwrap_or_default(),
+        symbols.get("pmos.cox").unwrap_or_default(),
+    );
+
+    // starting the characterization process
+    if let Err(e) = inverter::generate_deck(&config, build_dir) {
         error!("Failed to generate inverter SPICE deck: {}", e);
         return ExitCode::FAILURE;
     }

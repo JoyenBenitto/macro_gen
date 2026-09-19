@@ -6,11 +6,7 @@ use std::path::Path;
 
 const INVERTER_TEMPLATE: &str = include_str!("constants/inv.spice.j2");
 
-/// No width field exists in Config yet, so we default to a sane starting
-/// width (in microns) until sizing is driven by the config/CLI.
-const DEFAULT_WIDTH_UM: f64 = 0.42;
-
-pub fn logi(config: &Config, build_dir: &Path) -> std::io::Result<()> {
+pub fn generate_deck(config: &Config, build_dir: &Path) -> std::io::Result<()> {
     info!(
         "Running inverter characterization: vdd={}, corner={}, nmos={}, pmos={}",
         config.environment.vdd, config.environment.corner, config.models.nmos, config.models.pmos
@@ -25,7 +21,7 @@ pub fn logi(config: &Config, build_dir: &Path) -> std::io::Result<()> {
         .render(context! {
             vdd => config.environment.vdd,
             model_nmos => config.models.nmos,
-            w => DEFAULT_WIDTH_UM,
+            w => config.min_width,
             l => config.environment.min_length,
             include_path => config.environment.include_path,
             corner => config.environment.corner,

@@ -11,3 +11,6 @@ clap = { version = "4.6.7", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 minijinja = "2.24.0"
+
+[build-dependencies]
+pkg-config = "0.3"

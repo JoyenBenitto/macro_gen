@@ -3,9 +3,6 @@ use std::path::Path;
 use thiserror::Error;
 
 const ALLOWED_CORNERS: &[&str] = &["tt", "ff", "ss", "sf", "fs"];
-const REQUIRED_PLACEHOLDERS: &[&str] = &[
-    "{{name}}", "{{d}}", "{{g}}", "{{s}}", "{{b}}", "{{model}}", "{{w}}", "{{l}}",
-];
 const MAX_SANE_VDD: f64 = 10.0;
 
 #[derive(Debug, Error)]
@@ -16,6 +13,8 @@ pub enum ValidationError {
     VddOutOfRange(f64),
     #[error("environment.min_length must be positive, got {0}")]
     MinLengthNotPositive(f64),
+    #[error("environment.min_width must be positive, got {0}")]
+    MinWidthNotPositive(f64),
     #[error("environment.include_path does not exist on disk: {0}")]
     IncludePathMissing(String),
     #[error("environment.corner '{0}' is not one of the allowed corners: {1:?}")]
@@ -24,8 +23,13 @@ pub enum ValidationError {
     NmosEmpty,
     #[error("models.pmos must not be empty")]
     PmosEmpty,
-    #[error("syntax.device_template is missing required placeholder(s): {0:?}")]
-    TemplateMissingPlaceholders(Vec<&'static str>),
+    // checks if reference inverter size is greater or equal to the environment defaults
+    #[error("reference_inverter.{0} is smaller than environment.{1}: {2} < {3}")]
+    InverterMosSizeTooSmall(&'static str, &'static str, f64, f64),
+    #[error(
+        "reference_inverter.inverter_threshold = {0} must lie strictly between 0 and environment.vdd = {1}"
+    )]
+    InverterThresholdOutOfRange(f64, f64),
 }
 
 #[derive(Debug, Error)]
@@ -44,6 +48,18 @@ pub fn validate(config: &Config) -> Result<(), ValidationErrors> {
     if config.environment.min_length <= 0.0 {
         errors.push(ValidationError::MinLengthNotPositive(
             config.environment.min_length,
+        ));
+    }
+
+    if config.environment.min_length <= 0.0 {
+        errors.push(ValidationError::MinLengthNotPositive(
+            config.environment.min_length,
+        ));
+    }
+
+    if config.environment.min_width <= 0.0 {
+        errors.push(ValidationError::MinWidthNotPositive(
+            config.environment.min_width,
         ));
     }
 
@@ -67,15 +83,38 @@ pub fn validate(config: &Config) -> Result<(), ValidationErrors> {
         errors.push(ValidationError::PmosEmpty);
     }
 
-    let missing: Vec<&'static str> = REQUIRED_PLACEHOLDERS
-        .iter()
-        .filter(|p| !config.syntax.device_template.contains(*p))
-        .copied()
-        .collect();
-    if !missing.is_empty() {
-        errors.push(ValidationError::TemplateMissingPlaceholders(missing));
+    let ri = &config.reference_inverter;
+    let min_width = config.environment.min_width;
+    let min_length = config.environment.min_length;
+
+    if ri.nmos_w < min_width {
+        errors.push(ValidationError::InverterMosSizeTooSmall(
+            "nmos_w", "min_width", ri.nmos_w, min_width,
+        ));
     }
-    
+    if ri.pmos_w < min_width {
+        errors.push(ValidationError::InverterMosSizeTooSmall(
+            "pmos_w", "min_width", ri.pmos_w, min_width,
+        ));
+    }
+    if ri.nmos_l < min_length {
+        errors.push(ValidationError::InverterMosSizeTooSmall(
+            "nmos_l", "min_length", ri.nmos_l, min_length,
+        ));
+    }
+    if ri.pmos_l < min_length {
+        errors.push(ValidationError::InverterMosSizeTooSmall(
+            "pmos_l", "min_length", ri.pmos_l, min_length,
+        ));
+    }
+
+    if ri.inverter_threshold <= 0.0 || ri.inverter_threshold >= config.environment.vdd {
+        errors.push(ValidationError::InverterThresholdOutOfRange(
+            ri.inverter_threshold,
+            config.environment.vdd,
+        ));
+    }
+
     // Return the result of the validation
     if errors.is_empty() {
         Ok(())
