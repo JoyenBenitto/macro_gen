@@ -1,7 +1,13 @@
 mod characterization;
+mod config;
+mod validator;
 
 use characterization::inverter;
-use log::{info};
+use clap::Parser;
+use config::Config;
+use log::{error, info};
+use std::fs;
+use std::process::ExitCode;
 
 const ASCII_ART_LOGO: &str = r#"
  __   __  _______  _______  ______    _______    _______  _______  __    _
@@ -13,8 +19,50 @@ const ASCII_ART_LOGO: &str = r#"
 |_|   |_||__| |__||_______||___|  |_||_______|  |_______||_______||_|  |__|
 "#;
 
-fn main() {
-    env_logger::init();
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Path to the configuration file
+    #[arg(short, long)]
+    config: String,
+}
+
+fn main() -> ExitCode {
+    env_logger::Builder::from_env(env_logger::Env::new().filter_or("MACROGEN_LOG", "info")).init();
+    let args = Args::parse();
+
     info!("{}", ASCII_ART_LOGO);
-    inverter::logi();
+    info!("Configuration file: {}", args.config);
+
+    let raw = match fs::read_to_string(&args.config) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Could not read config file '{}': {}", args.config, e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let config: Config = match toml::from_str(&raw) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("'{}' is not a valid config file:\n{}", args.config, e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if let Err(errs) = validator::validate(&config) {
+        error!("Configuration '{}' failed validation:", args.config);
+        for e in &errs.0 {
+            error!("  - {}", e);
+        }
+        return ExitCode::FAILURE;
+    }
+
+    info!("Configuration validated successfully.");
+
+    // starting the characterization process
+    inverter::logi(&config);
+
+    ExitCode::SUCCESS
 }
