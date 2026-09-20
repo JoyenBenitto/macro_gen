@@ -1,3 +1,11 @@
+//! `macro_gen` is an automated digital IC macro generator.
+//!
+//! It drives ngspice in-process via FFI to characterize and size cells (starting
+//! with an inverter) against a PDK-supplied config, then emits a spice deck.
+//!
+//! See the [usage guide](https://joyenbenitto.github.io/macro_gen/) for CLI usage;
+//! this rustdoc reference covers the internal module structure.
+
 mod characterization;
 mod config;
 mod validator;

@@ -1,0 +1,10 @@
+[book]
+title = "macro_gen"
+description = "Automated digital IC macro generator"
+authors = ["Joyen Benitto"]
+src = "src"
+language = "en"
+
+[output.html]
+git-repository-url = "https://github.com/JoyenBenitto/macro_gen"
+edit-url-template = "https://github.com/JoyenBenitto/macro_gen/edit/main/docs/{path}"

@@ -1,4 +1,6 @@
 build/
+docs/book/
+site/
 
 # Added by cargo
 
