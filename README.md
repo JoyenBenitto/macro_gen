@@ -1,5 +1,7 @@
 # macro_gen
 
+[![Docs](https://img.shields.io/badge/docs-online-blue)](https://joyenbenitto.github.io/macro_gen/)
+
 Macro_gen is an automated digital IC macro generator.
 
 Full documentation: <https://joyenbenitto.github.io/macro_gen/>

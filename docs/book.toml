@@ -7,4 +7,9 @@ language = "en"
 
 [output.html]
 git-repository-url = "https://github.com/JoyenBenitto/macro_gen"
+git-repository-icon = "fab-github"
 edit-url-template = "https://github.com/JoyenBenitto/macro_gen/edit/main/docs/{path}"
+
+[output.html.fold]
+enable = true
+level = 0

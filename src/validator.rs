@@ -1,3 +1,10 @@
+//! Config sanity checks run before characterization starts.
+//!
+//! Covers: `environment` field positivity and range (vdd, min_length, min_width),
+//! the process corner allow-list, non-empty model names, reference-inverter sizing
+//! against the process minimums, the switching-threshold range, and sizing-sweep
+//! parameter sanity.
+
 use crate::config::Config;
 use std::path::Path;
 use thiserror::Error;
@@ -5,6 +12,7 @@ use thiserror::Error;
 const ALLOWED_CORNERS: &[&str] = &["tt", "ff", "ss", "sf", "fs"];
 const MAX_SANE_VDD: f64 = 1000.0;
 
+/// One specific config validation failure; see each variant's message for details.
 #[derive(Debug, Error)]
 pub enum ValidationError {
     #[error("environment.vdd must be positive, got {0}")]
@@ -39,6 +47,7 @@ pub enum ValidationError {
     WlSweepSampleCountZero,
 }
 
+/// The full set of validation failures collected by [`validate`].
 #[derive(Debug, Error)]
 #[error("configuration failed validation with {} error(s)", .0.len())]
 pub struct ValidationErrors(pub Vec<ValidationError>);
