@@ -163,6 +163,21 @@ pub fn generate_deck(
     session: &NgspiceSession,
 ) -> Result<(f64, f64), GenerateError> {
     let layout = BuildLayout::new(build_dir)?;
+    generate_deck_in_layout(config, &layout, symbols, session)
+}
+
+/// Same as [`generate_deck`], but takes an already-resolved [`BuildLayout`]
+/// instead of a raw `build_dir`. Split out so
+/// [`crate::characterization::custom_sizing::InverterSizer`] (dispatched
+/// to from [`crate::sizing::size_netlist`], which already has a
+/// `BuildLayout` for the whole run) can reuse this sizing flow without
+/// re-resolving/re-creating the output directories.
+pub fn generate_deck_in_layout(
+    config: &Config,
+    layout: &BuildLayout,
+    symbols: &SymbolTable,
+    session: &NgspiceSession,
+) -> Result<(f64, f64), GenerateError> {
     let ri = &config.reference_inverter;
     let min_width = config.environment.min_width;
     let min_length = config.environment.min_length;

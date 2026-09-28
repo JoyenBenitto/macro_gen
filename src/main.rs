@@ -7,7 +7,13 @@
 //! this rustdoc reference covers the internal module structure.
 
 mod characterization;
+#[cfg(feature = "circt")]
+mod circt_ffi;
 mod config;
+mod ir;
+mod sizing;
+#[cfg(feature = "circt")]
+mod spice_gen;
 mod validator;
 
 use characterization::device_params::SymbolTable;
@@ -70,6 +76,58 @@ fn print_run_summary(elapsed: std::time::Duration) {
     info!("=======================================================");
 }
 
+/// Parses `config.circt`'s MLIR input, sizes every gate in its top module
+/// (logical effort by default, the custom/analytical flow for anything
+/// tagged in `config.custom_cells`), and emits a SPICE deck. Keeps the
+/// non-CIRCT flow in `main` completely untouched -- `examples/130nm.toml`
+/// (no `[circt]` section) never reaches this function.
+#[cfg(feature = "circt")]
+fn run_circt_flow(
+    config: &Config,
+    build_dir: &std::path::Path,
+    symbols: &SymbolTable,
+    session: &NgspiceSession,
+) -> Result<(), ExitCode> {
+    let circt_cfg = config.circt.as_ref().expect("checked by caller");
+
+    let ctx = circt_ffi::CirctContext::new();
+    let mlir_module = ctx
+        .parse_file(std::path::Path::new(&circt_cfg.mlir_path))
+        .map_err(|e| {
+            error!("Failed to parse CIRCT input '{}': {}", circt_cfg.mlir_path, e);
+            ExitCode::FAILURE
+        })?;
+
+    let netlist = ir::from_circt::build_netlist(&mlir_module).map_err(|e| {
+        error!("Failed to build netlist from CIRCT IR: {}", e);
+        ExitCode::FAILURE
+    })?;
+    println!("CIRCT netlist: {:#?}", netlist);
+
+    let sized = sizing::size_netlist(&netlist, config, build_dir, symbols, session).map_err(|e| {
+        error!("Failed to size netlist: {}", e);
+        ExitCode::FAILURE
+    })?;
+
+    let layout = characterization::paths::BuildLayout::new(build_dir).map_err(|e| {
+        error!("Failed to set up build output directories: {}", e);
+        ExitCode::FAILURE
+    })?;
+
+    let out_path = spice_gen::emit_netlist(&sized, config, &layout).map_err(|e| {
+        error!("Failed to emit SPICE netlist: {}", e);
+        ExitCode::FAILURE
+    })?;
+
+    info!(
+        "Sized {} gate instance(s) in '{}'; wrote SPICE deck to {}",
+        sized.sizing.len(),
+        circt_cfg.top_module,
+        out_path.display()
+    );
+    Ok(())
+}
+
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::new().filter_or("MACROGEN_LOG", "info"))
         .format(|buf, record| {
@@ -119,6 +177,17 @@ fn main() -> ExitCode {
 
     info!("Configuration validated successfully.");
 
+    #[cfg(not(feature = "circt"))]
+    if config.circt.is_some() {
+        error!(
+            "Configuration '{}' has a [circt] section, but this build of \
+             macro_gen was compiled without the 'circt' feature. Rebuild \
+             with `--features circt` (and CIRCT_DIR set) to use it.",
+            args.config
+        );
+        return ExitCode::FAILURE;
+    }
+
     let build_dir = args.build_dir.as_path();
 
     let session = match NgspiceSession::start() {
@@ -138,6 +207,16 @@ fn main() -> ExitCode {
     };
     let symbols = SymbolTable::from_device_params(&device_params);
 
+    #[cfg(feature = "circt")]
+    {
+        if config.circt.is_some() {
+            if let Err(code) = run_circt_flow(&config, build_dir, &symbols, &session) {
+                return code;
+            }
+            print_run_summary(start.elapsed());
+            return ExitCode::SUCCESS;
+        }
+    }
     match inverter::generate_deck(&config, build_dir, &symbols, &session) {
         Ok((wn, wp)) => {
             info!("Reference inverter sized: Wn={:.4}um, Wp={:.4}um", wn, wp);

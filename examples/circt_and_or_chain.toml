@@ -1,0 +1,37 @@
+# Smallest CIRCT-driven example: `y = (a AND b) OR c` from
+# examples/circt/and_or_chain.mlir, sized via logical effort (no custom
+# cells). Same PDK settings as examples/130nm.toml -- adjust
+# environment.include_path to your local PDK install before running.
+#
+# Requires macro_gen built with `--features circt` and CIRCT_DIR set; see
+# docs/src for CIRCT setup instructions.
+#
+#   cargo run --features circt -- --config examples/circt_and_or_chain.toml --build-dir ./build_circt
+
+[environment]
+vdd = 1.8
+min_length = 0.15 # in microns
+min_width = 0.42 # in microns
+include_path = "/home/joyenbenitto/pdk/open_pdks/sources/sky130_fd_pr/combined_models/sky130.lib.spice"
+corner = "tt"
+
+[models]
+nmos = "sky130_fd_pr__nfet_01v8"
+pmos = "sky130_fd_pr__pfet_01v8"
+
+[reference_inverter]
+name = "sky130_fd_pr__inv_1"
+nmos_w = 0.42
+nmos_l = 0.15
+pmos_l = 0.15
+inverter_threshold = 0.9
+wl_sweep_granularity = 0.42
+wl_sweep_sample_count = 10
+
+[circt]
+mlir_path = "examples/circt/and_or_chain.mlir"
+top_module = "and_or_chain"
+
+# No [custom_cells] section: this fixture has no gate tagged for the
+# custom/analytical (sweep-based) flow -- everything is sized via logical
+# effort.

@@ -6,6 +6,31 @@ pub struct Config {
     pub environment: Environment,
     pub models: Models,
     pub reference_inverter: ReferenceInverter,
+    /// Present only for a CIRCT-driven run; when omitted, `main` falls back
+    /// to today's single-inverter flow untouched.
+    #[serde(default)]
+    pub circt: Option<CirctInput>,
+    /// Cells sized via the custom/analytical flow (today: the inverter
+    /// sweep) instead of logical effort. Matched against `hw.module`/
+    /// `hw.instance` names in the parsed CIRCT netlist.
+    #[serde(default)]
+    pub custom_cells: CustomCells,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct CirctInput {
+    /// Path to a textual `.mlir` file using only the `hw`+`comb` dialects.
+    pub mlir_path: String,
+    /// The `hw.module` to treat as the design root.
+    pub top_module: String,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct CustomCells {
+    #[serde(default)]
+    pub names: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
