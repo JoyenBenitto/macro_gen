@@ -3,7 +3,9 @@
 //! netlist ([`verilog`]). Both name each distinct (stage, drive) pair the
 //! same way, so the Verilog cells line up with the SPICE subckts for LVS.
 
+pub mod report;
 pub mod spice;
+pub mod tables;
 pub mod verilog;
 
 use crate::cmos::CmosStage;
@@ -23,6 +25,17 @@ impl UnitInverter {
     pub fn gamma(&self) -> f64 {
         self.wp / self.wn
     }
+}
+
+/// Physical width in microns of a transistor of relative width `rel` in a
+/// cell of drive `drive` (`w_ref`: the reference inverter's Wn or Wp),
+/// clamped to `min_width` and snapped when `w_is_multiple_of_w_min` is set.
+/// The flag is true when the ideal width was below `min_width`.
+pub(crate) fn physical_width(config: &crate::config::Config, rel: f64, drive: f64, w_ref: f64) -> (f64, bool) {
+    let env = &config.environment;
+    let w = rel * drive * w_ref;
+    let snapped = crate::characterization::inverter::quantize(w, env.min_width, config.reference_inverter.w_is_multiple_of_w_min);
+    (snapped.max(env.min_width), w < env.min_width)
 }
 
 /// A cell's stage and drive, the drive rounded to 0.01 so near-identical

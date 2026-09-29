@@ -5,7 +5,7 @@
 //! the pull-down) or PMOS (for the pull-up), and each stack is sized to
 //! drive as well as that inverter. Everything logical-effort needs (per-input
 //! `g`, parasitic `p`) follows from those widths and `gamma = Wp/Wn` of the
-//! reference inverter. Pure math -- no IR, config or FFI dependency.
+//! reference inverter. Pure math: no IR, config or FFI dependency.
 
 pub mod network;
 

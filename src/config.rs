@@ -45,6 +45,7 @@ pub struct Sizing {
 #[serde(deny_unknown_fields)]
 pub struct CirctInput {
     /// Path to a textual `.mlir` file using only the `hw`+`comb` dialects.
+    /// A relative path is resolved against the config file's directory.
     pub mlir_path: String,
     /// The `hw.module` to treat as the design root.
     pub top_module: String,

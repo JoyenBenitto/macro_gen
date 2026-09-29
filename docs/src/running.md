@@ -10,13 +10,14 @@ Example with a custom build directory:
 $ ./target/debug/macro_gen --config ./examples/130nm.toml --build-dir /tmp/my_run
 ```
 
-With the `circt` feature, a config that has `[circt]` and `[sizing]` sections
-also runs the CMOS backend. It writes a sized SPICE netlist and, with
-`--add-buffer`, a buffered structural Verilog netlist:
+With the `circt` feature, a config with `[circt]` and `[sizing]` sections also
+sizes a design. It always writes a SPICE netlist and a report, and optionally
+structural Verilog and a buffered netlist:
 
 ```bash
-$ cargo run --features circt -- --config examples/circt_and_or_chain.toml \
-      --build-dir ./build_circt --add-buffer --emit-buffered-spice
+$ ./target/release/macro_gen --config benchmarks/c17/c17.toml --emit-verilog --add-buffer
 ```
 
-See [CLI Reference](./cli-reference.md) for all available flags.
+See [CMOS Backend](./cmos-backend.md) for details, [Benchmarks](./benchmarks.md)
+for running the whole suite, and [CLI Reference](./cli-reference.md) for all
+flags.

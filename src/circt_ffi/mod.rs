@@ -173,6 +173,19 @@ impl<'m> Operation<'m> {
         Some(mlir_string_ref_to_string(unsafe { raw::mlirFlatSymbolRefAttrGetValue(attr) }))
     }
 
+    /// An integer attribute's value, e.g. `hw.constant`'s `value` (`true :
+    /// i1` reads as -1, sign-extended).
+    pub fn int_attr(&self, name: &str) -> Option<i64> {
+        let c_name = CString::new(name).ok()?;
+        let attr = unsafe {
+            raw::mlirOperationGetAttributeByName(self.op, mlir_string_ref(&c_name))
+        };
+        if attr.ptr.is_null() || !unsafe { raw::mlirAttributeIsAInteger(attr) } {
+            return None;
+        }
+        Some(unsafe { raw::mlirIntegerAttrGetValueInt(attr) })
+    }
+
     /// Every user-added (discardable) attribute on this op whose value is a
     /// string, e.g. `macro_gen.cell = "complex"`. Inherent attributes
     /// (`sym_name`, `module_type`, ...) are not included.

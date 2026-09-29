@@ -7,3 +7,6 @@
   - The build script (`build.rs`) uses `pkg-config` to locate `ngspice.pc`; if it's
     missing, `cargo build` fails immediately with an explanatory message rather than a
     cryptic linker error.
+- For the CMOS backend only: a pre-built [CIRCT](https://circt.llvm.org/)
+  (with its MLIR), pointed to by `CIRCT_DIR`, and Python 3.11 or newer to run
+  the benchmark suite.

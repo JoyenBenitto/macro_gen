@@ -10,7 +10,7 @@
 //!   normal form over the input literals. If every literal is
 //!   uninverted (e.g. `(a & b) | c`), the stage's pull-down computes the
 //!   complement (AND -> series, OR -> parallel) and an INV restores
-//!   polarity -- AOI21 + INV for that example. If every literal is inverted
+//!   polarity: AOI21 + INV for that example. If every literal is inverted
 //!   the function is a single stage with the dual pull-down.
 //! - XOR2 / XNOR2 / MUX2 (not unate) and module instances are rejected.
 

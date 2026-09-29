@@ -5,6 +5,7 @@
 pub mod buffer;
 pub mod cmos_map;
 pub mod dead_logic;
+pub mod simplify;
 pub mod sizing;
 
 use crate::ir::{Design, IrError};
@@ -73,7 +74,7 @@ impl PassManager {
 /// The pipeline run on every imported design. New passes are appended here.
 pub fn default_pipeline() -> PassManager {
     let mut pm = PassManager::new();
-    pm.add(dead_logic::DeadLogicElimination);
+    pm.add(dead_logic::DeadLogicElimination).add(simplify::GateSimplify);
     pm
 }
 

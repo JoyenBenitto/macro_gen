@@ -15,6 +15,7 @@
 // driven by the CIRCT flow.
 #[cfg_attr(not(feature = "circt"), allow(dead_code))]
 mod backend;
+mod build_info;
 mod characterization;
 #[cfg(feature = "circt")]
 mod circt_ffi;
@@ -52,9 +53,12 @@ const ASCII_ART_LOGO: &str = r#"
 |_|   |_||__| |__||_______||___|  |_||_______|  |_______||_______||_|  |__|
 "#;
 
+/// `--version` output: version, commit, build time, toolchain, features.
+static LONG_VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(build_info::long_version);
+
 /// Automated digital IC macro generator
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(version, long_version = LONG_VERSION.as_str(), about, long_about = None)]
 struct Args {
     /// Path to the configuration file
     #[arg(short, long)]
@@ -66,12 +70,18 @@ struct Args {
     build_dir: PathBuf,
 
     /// CIRCT flow: buffer every output to the delay-optimal
-    /// round(log_rho F) stages (rho = sizing.stage_effort) and write a
-    /// structural Verilog netlist under `verilog/`. `invertible` (the
+    /// round(log_rho F) stages (rho = sizing.stage_effort) and write the
+    /// buffered netlist as structural Verilog (`verilog/<top>_buffered.v`). `invertible` (the
     /// default) allows any number of added inverters, so an output may come
     /// out inverted; `non-invertible` adds them in inv+inv pairs.
     #[arg(long, value_enum, value_name = "MODE", num_args = 0..=1, default_missing_value = "invertible")]
     add_buffer: Option<passes::buffer::BufferMode>,
+
+    /// CIRCT flow: write the sized (unbuffered) netlist as structural,
+    /// PD-clean Verilog: `verilog/<top>.v` plus black-box cell declarations
+    /// in `verilog/<top>_cells.v`.
+    #[arg(long)]
+    emit_verilog: bool,
 
     /// CIRCT flow: also write the buffered netlist as SPICE
     /// (`spice/<top>_buffered.spice`). Implies `--add-buffer`.
@@ -91,6 +101,29 @@ fn peak_memory_kb() -> Option<u64> {
     })
 }
 
+/// Logo plus what is running where: version and commit, how it was built,
+/// the host it runs on, and the exact command line.
+fn print_banner() {
+    use build_info::{NGSPICE, PROFILE, RUSTC, TARGET};
+    let sys = build_info::SystemInfo::collect();
+    let cwd = std::env::current_dir().map_or_else(|_| "unknown".into(), |p| p.display().to_string());
+    let command: Vec<String> = std::env::args().collect();
+
+    info!("{}", ASCII_ART_LOGO);
+    info!("  {}: {}", build_info::generator(), env!("CARGO_PKG_DESCRIPTION"));
+    info!("======================================================");
+    info!("  Built    : {} ({PROFILE}, features: {})", build_info::build_time(), build_info::features());
+    info!("  Toolchain: {RUSTC}, {TARGET}");
+    info!("  ngspice  : {NGSPICE}");
+    info!("  Started  : {}", build_info::now_utc());
+    info!("  Host     : {}", sys.host);
+    info!("  OS       : {}", sys.os);
+    info!("  CPU      : {}, {} RAM", sys.cpu, sys.memory);
+    info!("  Command  : {}", command.join(" "));
+    info!("  Workdir  : {cwd}");
+    info!("======================================================");
+}
+
 fn print_run_summary(elapsed: std::time::Duration) {
     let elapsed_s = elapsed.as_secs_f64();
     let memory = peak_memory_kb()
@@ -98,6 +131,7 @@ fn print_run_summary(elapsed: std::time::Duration) {
         .unwrap_or_else(|| "n/a".to_string());
 
     info!("==================== Run Summary ====================");
+    info!("  Finished          : {}", build_info::now_utc());
     info!("  Elapsed time      : {:.3}s", elapsed_s);
     info!("  Peak memory (RSS) : {}", memory);
     info!("=======================================================");
@@ -107,9 +141,10 @@ fn print_run_summary(elapsed: std::time::Duration) {
 /// pipeline, then the CMOS backend: lowers the top module to
 /// pull-up/pull-down stages, sizes them by logical effort against the
 /// characterized reference inverter `unit`, and writes
-/// `spice/<top>.spice`. With `--add-buffer` / `--emit-buffered-spice` it
-/// then buffers the outputs and writes `verilog/<top>.v` (+ `<top>_cells.v`)
-/// and optionally `spice/<top>_buffered.spice`.
+/// `spice/<top>.spice` (and `verilog/<top>.v` with `--emit-verilog`). With
+/// `--add-buffer` / `--emit-buffered-spice` it then buffers the outputs and
+/// writes `verilog/<top>_buffered.v` and optionally
+/// `spice/<top>_buffered.spice`. Always ends with `reports/<top>.toml`.
 #[cfg(feature = "circt")]
 fn run_circt_flow(
     config: &Config,
@@ -170,22 +205,46 @@ fn run_circt_flow(
         sizing.cin_cinv,
         design.module(top).attrs.get(passes::sizing::ATTR_STAGE_EFFORT).map_or("-", String::as_str)
     );
-    write(&layout.spice_dir, format!("{top_name}.spice"), backend::spice::render(design.module(top), config, &unit))?;
+    let verilog_dir = args.build_dir.join("verilog");
+    let m = design.module(top);
+    write(&layout.spice_dir, format!("{top_name}.spice"), backend::spice::render(m, config, &unit))?;
+    if args.emit_verilog {
+        write(&verilog_dir, format!("{top_name}.v"), backend::verilog::render(m))?;
+        write(&verilog_dir, format!("{top_name}_cells.v"), backend::verilog::render_cells(m))?;
+    }
 
-    let mode = args.add_buffer.or(args.emit_buffered_spice.then_some(BufferMode::Invertible));
-    if let Some(mode) = mode {
+    let buffer_mode = args.add_buffer.or(args.emit_buffered_spice.then_some(BufferMode::Invertible));
+    let unbuffered = backend::report::metrics(m, unit.gamma()).map_err(|e| fail("Failed to measure design", &e))?;
+    let plans = passes::buffer::plan(m, &params, sizing.stage_effort, buffer_mode.unwrap_or(BufferMode::Invertible))
+        .map_err(|e| fail("Failed to plan buffering", &e))?;
+
+    let tables = |label: &str, m: &ir::Module, plans: Option<&[passes::buffer::OutputPlan]>| {
+        backend::tables::log_cells(&format!("Sized cells ({label})"), m, config, &unit)
+            .and_then(|_| backend::tables::log_paths(&format!("Output paths ({label})"), m, config, unit.gamma(), plans))
+            .map_err(|e| fail("Failed to tabulate sizing", &e))
+    };
+    backend::tables::log_assumptions(config, &unit, buffer_mode);
+    tables("unbuffered", m, Some(&plans))?;
+    let mut report = backend::report::Report::new(m, unit.gamma(), sizing.cload_cinv, sizing.cin_cinv, unbuffered, plans);
+
+    if let Some(mode) = buffer_mode {
         let mut buffering = passes::buffer_pipeline(mode, sizing.stage_effort, params);
         info!("Buffer pipeline ({mode:?}): {}", buffering.pass_names().join(", "));
         buffering.run(&mut design).map_err(|e| fail("Buffer pipeline failed", &e))?;
 
-        let verilog_dir = args.build_dir.join("verilog");
         let m = design.module(top);
-        write(&verilog_dir, format!("{top_name}.v"), backend::verilog::render(m))?;
-        write(&verilog_dir, format!("{top_name}_cells.v"), backend::verilog::render_cells(m))?;
+        tables("buffered", m, None)?;
+        report.set_buffered(backend::report::metrics(m, unit.gamma()).map_err(|e| fail("Failed to measure design", &e))?);
+        write(&verilog_dir, format!("{top_name}_buffered.v"), backend::verilog::render(m))?;
+        write(&verilog_dir, format!("{top_name}_buffered_cells.v"), backend::verilog::render_cells(m))?;
         if args.emit_buffered_spice {
             write(&layout.spice_dir, format!("{top_name}_buffered.spice"), backend::spice::render(m, config, &unit))?;
         }
     }
+
+    backend::tables::log_summary(&report);
+    info!("");
+    write(&args.build_dir.join("reports"), format!("{top_name}.toml"), report.to_toml())?;
 
     log::debug!("Sized netlist: {:#?}", design);
     Ok(())
@@ -211,7 +270,7 @@ fn main() -> ExitCode {
     let start = Instant::now();
     let args = Args::parse();
 
-    info!("{}", ASCII_ART_LOGO);
+    print_banner();
     info!("Configuration file: {}", args.config);
 
     let raw = match fs::read_to_string(&args.config) {
@@ -222,13 +281,42 @@ fn main() -> ExitCode {
         }
     };
 
-    let config: Config = match toml::from_str(&raw) {
+    if args.config.ends_with(".mlir") {
+        error!(
+            "'{}' is an MLIR design, not a config. Name it in the config's [circt] section and \
+             pass the config with --config:\n  [circt]\n  mlir_path = \"{}\"\n  top_module = \"<hw.module name>\"",
+            args.config, args.config
+        );
+        return ExitCode::FAILURE;
+    }
+
+    let mut config: Config = match toml::from_str(&raw) {
         Ok(c) => c,
         Err(e) => {
             error!("'{}' is not a valid config file:\n{}", args.config, e);
             return ExitCode::FAILURE;
         }
     };
+
+    // A relative mlir_path is relative to the config file, so a design and
+    // its config can live side by side and run from anywhere.
+    if let Some(circt) = config.circt.as_mut() {
+        let mlir = std::path::Path::new(&circt.mlir_path);
+        if mlir.is_relative() {
+            let base = std::path::Path::new(&args.config).parent().unwrap_or(std::path::Path::new(""));
+            circt.mlir_path = base.join(mlir).display().to_string();
+        }
+    }
+
+    let wants_backend = args.emit_verilog || args.add_buffer.is_some() || args.emit_buffered_spice;
+    if wants_backend && config.circt.is_none() {
+        error!(
+            "--emit-verilog / --add-buffer / --emit-buffered-spice need a design, but '{}' has no \
+             [circt] section (mlir_path, top_module)",
+            args.config
+        );
+        return ExitCode::FAILURE;
+    }
 
     if let Err(errs) = validator::validate(&config) {
         error!("Configuration '{}' failed validation:", args.config);

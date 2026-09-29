@@ -53,7 +53,7 @@ pub fn extra_stages(f_path: f64, n_logic: usize, rho: f64, mode: BufferMode) -> 
 }
 
 /// Stages on the longest input-to-cell path, counting the cell itself.
-fn depths(m: &Module) -> Result<HashMap<CellId, usize>, IrError> {
+pub(crate) fn depths(m: &Module) -> Result<HashMap<CellId, usize>, IrError> {
     let mut depth = HashMap::new();
     for cell in topo_order(m)? {
         let d = m
@@ -68,6 +68,37 @@ fn depths(m: &Module) -> Result<HashMap<CellId, usize>, IrError> {
     Ok(depth)
 }
 
+/// What buffering does (or would do) to one output port.
+#[derive(Debug, Clone)]
+pub struct OutputPlan {
+    pub port: String,
+    /// Stages on the port's critical path before buffering.
+    pub logic_stages: usize,
+    /// `F = f^N` for that path.
+    pub path_effort: f64,
+    pub added_inverters: usize,
+}
+
+/// Plans buffering for every output port of a sized (`cmos-map`ped) module,
+/// in port order. Ports driven straight by an input are skipped.
+pub fn plan(m: &Module, params: &SizingParams, rho: f64, mode: BufferMode) -> Result<Vec<OutputPlan>, IrError> {
+    let f = sizing::solve(m, params)?.stage_effort;
+    let depth = depths(m)?;
+    let mut plans = Vec::new();
+    for (pid, port) in m.ports().iter().filter(|(_, p)| p.dir == Direction::Output) {
+        let Some(net) = m.port_net(pid) else { continue };
+        let Some(n_logic) = driver_cell(m, net).map(|c| depth[&c]) else { continue };
+        let path_effort = f.powi(n_logic as i32);
+        plans.push(OutputPlan {
+            port: port.name.clone(),
+            logic_stages: n_logic,
+            path_effort,
+            added_inverters: extra_stages(path_effort, n_logic, rho, mode),
+        });
+    }
+    Ok(plans)
+}
+
 impl Pass for BufferInsertion {
     fn name(&self) -> &'static str {
         "buffer-insertion"
@@ -76,26 +107,17 @@ impl Pass for BufferInsertion {
     fn run(&mut self, design: &mut Design) -> Result<(), IrError> {
         let top = design.top().ok_or_else(|| IrError::Unsupported("buffering needs a top module".into()))?;
         let m = design.module_mut(top);
-        let f = sizing::solve(m, &self.params)?.stage_effort;
-        let depth = depths(m)?;
-
-        let outputs: Vec<_> = m
-            .ports()
-            .iter()
-            .filter(|(_, p)| p.dir == Direction::Output)
-            .map(|(id, p)| (id, p.name.clone()))
-            .collect();
-        for (pid, port) in outputs {
-            let Some(net) = m.port_net(pid) else { continue };
-            let Some(n_logic) = driver_cell(m, net).map(|c| depth[&c]) else { continue };
-            let f_path = f.powi(n_logic as i32);
-            let extra = extra_stages(f_path, n_logic, self.rho, self.mode);
+        for p in plan(m, &self.params, self.rho, self.mode)? {
+            let (port, extra) = (p.port, p.added_inverters);
             info!(
-                "output '{port}': {n_logic} logic stage(s), path effort F = {f_path:.2}, adding {extra} inverter(s)"
+                "output '{port}': {} logic stage(s), path effort F = {:.2}, adding {extra} inverter(s)",
+                p.logic_stages, p.path_effort
             );
             if extra == 0 {
                 continue;
             }
+            let pid = m.port_by_name(&port).expect("planned from this module's ports");
+            let net = m.port_net(pid).expect("planned ports are connected");
 
             let port_pin = m.ports()[pid].pin;
             m.disconnect(port_pin);

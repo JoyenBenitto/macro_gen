@@ -61,6 +61,9 @@ struct BodyBuilder<'d> {
     net_by_value: HashMap<usize, NetId>,
     /// Nets already renamed after an output port (only the first port wins).
     named_by_output: HashSet<NetId>,
+    /// `hw.constant` results (by [`Value::identity`]) → their `i1` value.
+    /// Only `comb.xor` with a constant `true` (a NOT) may use them.
+    constants: HashMap<usize, bool>,
     next_cell: u32,
     next_net: u32,
 }
@@ -72,6 +75,7 @@ impl<'d> BodyBuilder<'d> {
             module,
             net_by_value: HashMap::new(),
             named_by_output: HashSet::new(),
+            constants: HashMap::new(),
             next_cell: 0,
             next_net: 0,
         }
@@ -89,11 +93,20 @@ impl<'d> BodyBuilder<'d> {
             self.net_by_value.insert(value.identity(), net);
         }
 
+        // Constants first: a graph region may use one before defining it.
+        for op in hw_module.children().filter(|op| op.name() == "hw.constant") {
+            let value = op
+                .int_attr("value")
+                .ok_or_else(|| IrError::MissingAttribute("hw.constant".to_string(), "value"))?;
+            self.constants.insert(op.result(0).identity(), value != 0);
+        }
+
         for op in hw_module.children() {
             match op.name().as_str() {
+                "hw.constant" => {}
                 "comb.and" => self.add_nary_gate(&op, GateType::And2)?,
                 "comb.or" => self.add_nary_gate(&op, GateType::Or2)?,
-                "comb.xor" => self.add_nary_gate(&op, GateType::Xor2)?,
+                "comb.xor" => self.add_xor(&op)?,
                 "hw.instance" => self.add_instance(&op)?,
                 "hw.output" => self.connect_outputs(&op)?,
                 other => return Err(IrError::UnsupportedOp(other.to_string())),
@@ -125,6 +138,38 @@ impl<'d> BodyBuilder<'d> {
         net
     }
 
+    /// The net for operand `i` of `op`. Constants have no net: only
+    /// [`Self::add_xor`] handles them.
+    fn operand_net(&mut self, op: &Operation<'_>, i: usize) -> Result<NetId, IrError> {
+        let value = op.operand(i);
+        if self.constants.contains_key(&value.identity()) {
+            return Err(IrError::UnsupportedOp(format!(
+                "{} with a constant operand (only `comb.xor %x, %true`, a NOT, is supported)",
+                op.name()
+            )));
+        }
+        Ok(self.net_for(value))
+    }
+
+    /// `comb.xor`: CIRCT spells NOT as `comb.xor %x, %true`, which becomes
+    /// an INV. Without constants it is an XOR2 chain.
+    fn add_xor(&mut self, op: &Operation<'_>) -> Result<(), IrError> {
+        let (consts, vars): (Vec<usize>, Vec<usize>) =
+            (0..op.num_operands()).partition(|&i| self.constants.contains_key(&op.operand(i).identity()));
+        if consts.is_empty() {
+            return self.add_nary_gate(op, GateType::Xor2);
+        }
+        let invert = consts.iter().fold(false, |acc, &i| acc ^ self.constants[&op.operand(i).identity()]);
+        if vars.len() != 1 || !invert {
+            return Err(IrError::UnsupportedOp(
+                "comb.xor with constants other than a single NOT (`comb.xor %x, %true`)".to_string(),
+            ));
+        }
+        let input = self.net_for(op.operand(vars[0]));
+        let out = self.net_for(op.result(0));
+        self.emit_gate(GateType::Inv, &[input], out)
+    }
+
     /// `comb.and`/`or`/`xor` are N-ary in MLIR; the gate library is
     /// 2-input, so N operands become a left-associative chain of N-1 gates.
     fn add_nary_gate(&mut self, op: &Operation<'_>, gate: GateType) -> Result<(), IrError> {
@@ -132,9 +177,9 @@ impl<'d> BodyBuilder<'d> {
         if n < 2 {
             return Err(IrError::UnsupportedOp(format!("{} with {n} operand(s)", op.name())));
         }
-        let mut acc = self.net_for(op.operand(0));
+        let mut acc = self.operand_net(op, 0)?;
         for i in 1..n {
-            let rhs = self.net_for(op.operand(i));
+            let rhs = self.operand_net(op, i)?;
             let out = if i == n - 1 { self.net_for(op.result(0)) } else { self.fresh_net() };
             self.emit_gate(gate, &[acc, rhs], out)?;
             acc = out;
@@ -170,7 +215,7 @@ impl<'d> BodyBuilder<'d> {
 
         let mut nets = Vec::new();
         for i in 0..op.num_operands() {
-            nets.push(self.net_for(op.operand(i)));
+            nets.push(self.operand_net(op, i)?);
         }
         for i in 0..op.num_results() {
             nets.push(self.net_for(op.result(i)));
@@ -200,7 +245,7 @@ impl<'d> BodyBuilder<'d> {
     fn connect_outputs(&mut self, op: &Operation<'_>) -> Result<(), IrError> {
         let output_ports = self.ports_of(Direction::Output);
         for (i, port) in output_ports.into_iter().enumerate().take(op.num_operands()) {
-            let net = self.net_for(op.operand(i));
+            let net = self.operand_net(op, i)?;
             let m = self.design.module_mut(self.module);
             m.connect(m.ports()[port].pin, net)?;
             let driven_by_cell = m
@@ -229,7 +274,7 @@ mod tests {
 
     #[test]
     fn and_or_chain_has_named_ports_linked_to_nets() {
-        let d = import(include_str!("../../examples/circt/and_or_chain.mlir"));
+        let d = import(include_str!("../../benchmarks/and_or_chain/and_or_chain.mlir"));
         let id = d.module_by_name("and_or_chain").unwrap();
         let m = d.module(id);
 
@@ -315,5 +360,32 @@ mod tests {
             .parse_str("hw.module @w(in %a: i4, out y: i4) { hw.output %a : i4 }", "test")
             .unwrap();
         assert!(matches!(build_design(&module), Err(IrError::UnsupportedWidth(_, _, 4))));
+    }
+
+    #[test]
+    fn xor_with_true_is_an_inverter() {
+        let d = import(
+            r#"hw.module @n(in %a: i1, in %b: i1, out y: i1) {
+  %0 = comb.and %a, %b : i1
+  %1 = comb.xor %0, %true : i1
+  %true = hw.constant true
+  hw.output %1 : i1
+}"#,
+        );
+        let m = d.module(d.module_by_name("n").unwrap());
+        let kinds: Vec<_> = m.cells().iter().map(|(_, c)| c.kind).collect();
+        assert_eq!(kinds, vec![CellKind::Gate(GateType::And2), CellKind::Gate(GateType::Inv)]);
+    }
+
+    #[test]
+    fn other_constant_uses_are_rejected() {
+        let ctx = CirctContext::new();
+        let src = r#"hw.module @c(in %a: i1, out y: i1) {
+  %false = hw.constant false
+  %0 = comb.and %a, %false : i1
+  hw.output %0 : i1
+}"#;
+        let module = ctx.parse_str(src, "test").unwrap();
+        assert!(matches!(build_design(&module), Err(IrError::UnsupportedOp(_))));
     }
 }

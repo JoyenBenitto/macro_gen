@@ -1,13 +1,64 @@
 fn main() {
-    if pkg_config::probe_library("ngspice").is_err() {
+    let ngspice = pkg_config::probe_library("ngspice").unwrap_or_else(|_| {
         panic!(
             "could not find the 'ngspice' pkg-config library (ngspice.pc); \
              install the libngspice development package (e.g. libngspice0-dev on Debian/Ubuntu)"
-        );
-    }
+        )
+    });
+
+    build_info(&ngspice.version);
 
     #[cfg(feature = "circt")]
     link_circt();
+}
+
+/// Bakes provenance into the binary as `MACRO_GEN_*` env vars, read by
+/// `src/build_info.rs` for the startup banner, `--version` and output
+/// headers: git commit (+ `-dirty`), build time (honours
+/// `SOURCE_DATE_EPOCH` for reproducible builds), rustc, target, profile and
+/// the ngspice version pkg-config found. Every lookup degrades to
+/// "unknown" rather than failing the build (e.g. outside a git checkout).
+fn build_info(ngspice_version: &str) {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Re-run when the checked-out commit or the index changes, so the hash
+    // and dirty flag follow commits without re-running on every edit.
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/index");
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+
+    let run = |cmd: &str, args: &[&str]| -> Option<String> {
+        let out = Command::new(cmd).args(args).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+
+    let git = match run("git", &["rev-parse", "--short=10", "HEAD"]) {
+        Some(hash) => {
+            let dirty = run("git", &["status", "--porcelain", "--untracked-files=no"])
+                .is_some_and(|s| !s.is_empty());
+            if dirty { format!("{hash}-dirty") } else { hash }
+        }
+        None => "unknown".to_string(),
+    };
+    let epoch = std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or_else(|| SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()));
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
+    let rustc_version = run(&rustc, &["--version"]).unwrap_or_else(|| "unknown".to_string());
+
+    let vars = [
+        ("MACRO_GEN_GIT", git),
+        ("MACRO_GEN_BUILD_EPOCH", epoch.to_string()),
+        ("MACRO_GEN_RUSTC", rustc_version),
+        ("MACRO_GEN_TARGET", std::env::var("TARGET").unwrap_or_default()),
+        ("MACRO_GEN_PROFILE", std::env::var("PROFILE").unwrap_or_default()),
+        ("MACRO_GEN_NGSPICE", ngspice_version.to_string()),
+    ];
+    for (key, value) in vars {
+        println!("cargo:rustc-env={key}={value}");
+    }
 }
 
 /// Links against CIRCT/MLIR and generates Rust bindings for its C API
