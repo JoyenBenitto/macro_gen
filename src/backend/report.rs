@@ -17,13 +17,49 @@ pub struct Report {
     pub generator: String,
     pub generated_at: String,
     pub top: String,
-    pub gamma: f64,
-    pub cload_cinv: f64,
-    pub cin_cinv: f64,
+    pub units: Units,
+    pub reference_inverter: ReferenceInverter,
+    pub sizing: SizingTargets,
     pub unbuffered: Metrics,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub buffered: Option<Metrics>,
     pub outputs: Vec<OutputReport>,
+}
+
+/// What each unit suffix in the report means.
+#[derive(Debug, Serialize)]
+pub struct Units {
+    pub um: &'static str,
+    #[serde(rename = "fF")]
+    pub ff: &'static str,
+    pub cinv: String,
+    pub tau: &'static str,
+    pub fo4: &'static str,
+    pub effort: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReferenceInverter {
+    pub wn_um: f64,
+    pub wp_um: f64,
+    pub ln_um: f64,
+    pub lp_um: f64,
+    /// Wp / Wn.
+    pub gamma: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub c_inv_ff: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SizingTargets {
+    pub cload_cinv: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cload_ff: Option<f64>,
+    pub cin_cinv: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cin_ff: Option<f64>,
+    /// Target stage effort rho for buffering.
+    pub stage_effort: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -31,8 +67,9 @@ pub struct Metrics {
     pub stage_effort: f64,
     pub cells: usize,
     pub transistors: usize,
-    /// Worst output delay, in `tau`.
+    /// Worst output delay.
     pub delay_tau: f64,
+    pub delay_fo4: f64,
     #[serde(skip)]
     pub output_delay: HashMap<String, f64>,
 }
@@ -47,6 +84,11 @@ pub struct OutputReport {
     pub delay_tau: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub buffered_delay_tau: Option<f64>,
+}
+
+/// Rounds for the report: 4 decimals is well below the model's accuracy.
+fn r4(x: f64) -> f64 {
+    (x * 1e4).round() / 1e4
 }
 
 /// The stage effort sizing recorded on `m`.
@@ -94,11 +136,13 @@ pub fn metrics(m: &Module, gamma: f64) -> Result<Metrics, IrError> {
             (p.name.clone(), d)
         })
         .collect();
+    let worst = output_delay.values().copied().fold(0.0, f64::max);
     Ok(Metrics {
-        stage_effort: f,
+        stage_effort: r4(f),
         cells: m.cells().len(),
         transistors,
-        delay_tau: output_delay.values().copied().fold(0.0, f64::max),
+        delay_tau: r4(worst),
+        delay_fo4: r4(worst / 5.0),
         output_delay,
     })
 }
@@ -106,30 +150,53 @@ pub fn metrics(m: &Module, gamma: f64) -> Result<Metrics, IrError> {
 impl Report {
     pub fn new(
         m: &Module,
-        gamma: f64,
-        cload_cinv: f64,
-        cin_cinv: f64,
+        unit: &crate::backend::UnitInverter,
+        sizing: &crate::config::Sizing,
         unbuffered: Metrics,
         plans: Vec<OutputPlan>,
     ) -> Self {
         let outputs = plans
             .into_iter()
             .map(|p| OutputReport {
-                delay_tau: unbuffered.output_delay.get(&p.port).copied().unwrap_or(0.0),
+                delay_tau: r4(unbuffered.output_delay.get(&p.port).copied().unwrap_or(0.0)),
                 name: p.port,
                 logic_stages: p.logic_stages,
-                path_effort: p.path_effort,
+                path_effort: r4(p.path_effort),
                 added_inverters: p.added_inverters,
                 buffered_delay_tau: None,
             })
             .collect();
+        let ff = |cinv: f64| unit.c_inv_ff.map(|c| r4(cinv * c));
         Report {
             generator: crate::build_info::generator(),
             generated_at: crate::build_info::now_utc(),
             top: m.name.clone(),
-            gamma,
-            cload_cinv,
-            cin_cinv,
+            units: Units {
+                um: "micrometre",
+                ff: "femtofarad",
+                cinv: match unit.c_inv_ff {
+                    Some(c) => format!("input capacitance of the reference inverter, 1 C_inv = {c:.4} fF"),
+                    None => "input capacitance of the reference inverter".into(),
+                },
+                tau: "logical effort delay unit (delay of an ideal inverter driving an identical one, no parasitics)",
+                fo4: "delay of an inverter driving four identical ones, 1 FO4 = 5 tau",
+                effort: "stage_effort, path_effort and gamma are dimensionless",
+            },
+            reference_inverter: ReferenceInverter {
+                wn_um: r4(unit.wn),
+                wp_um: r4(unit.wp),
+                ln_um: r4(unit.ln),
+                lp_um: r4(unit.lp),
+                gamma: r4(unit.gamma()),
+                c_inv_ff: unit.c_inv_ff.map(r4),
+            },
+            sizing: SizingTargets {
+                cload_cinv: sizing.cload_cinv,
+                cload_ff: ff(sizing.cload_cinv),
+                cin_cinv: sizing.cin_cinv,
+                cin_ff: ff(sizing.cin_cinv),
+                stage_effort: sizing.stage_effort,
+            },
             unbuffered,
             buffered: None,
             outputs,
@@ -138,7 +205,7 @@ impl Report {
 
     pub fn set_buffered(&mut self, buffered: Metrics) {
         for o in &mut self.outputs {
-            o.buffered_delay_tau = buffered.output_delay.get(&o.name).copied();
+            o.buffered_delay_tau = buffered.output_delay.get(&o.name).copied().map(r4);
         }
         self.buffered = Some(buffered);
     }
@@ -170,7 +237,9 @@ mod tests {
         assert_eq!(before.transistors, 2);
 
         let plans = plan(d.module(top), &params, 4.0, BufferMode::Invertible).unwrap();
-        let mut report = Report::new(d.module(top), 2.0, 64.0, 1.0, before, plans);
+        let unit = crate::backend::UnitInverter { wn: 1.0, wp: 2.0, ln: 0.15, lp: 0.15, c_inv_ff: Some(1.5) };
+        let sizing = crate::config::Sizing { cload_cinv: 64.0, cin_cinv: 1.0, stage_effort: 4.0 };
+        let mut report = Report::new(d.module(top), &unit, &sizing, before, plans);
         BufferInsertion { mode: BufferMode::Invertible, rho: 4.0, params }.run(&mut d).unwrap();
         LogicalEffortSizing(params).run(&mut d).unwrap();
         report.set_buffered(metrics(d.module(top), 2.0).unwrap());
@@ -181,5 +250,6 @@ mod tests {
         assert!((out.buffered_delay_tau.unwrap() - 15.0).abs() < 1e-6);
         let text = report.to_toml().unwrap();
         assert!(text.contains("[buffered]") && text.contains("[[outputs]]"), "{text}");
+        assert!(text.contains("cload_ff = 96.0") && text.contains("1 C_inv = 1.5000 fF"), "{text}");
     }
 }

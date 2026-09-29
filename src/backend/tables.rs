@@ -43,21 +43,26 @@ pub fn log_assumptions(config: &Config, unit: &UnitInverter, buffer: Option<Buff
     let env = &config.environment;
     let sizing = config.sizing.as_ref().expect("validator requires [sizing] with [circt]");
     let snap = if config.reference_inverter.w_is_multiple_of_w_min { ", snapped to multiples" } else { "" };
+    let ff = |cinv: f64| unit.c_inv_ff.map_or(String::new(), |c| format!(" ({:.2} fF)", cinv * c));
+    let c_inv = match unit.c_inv_ff {
+        Some(c) => format!("C_inv = {c:.3} fF, the reference inverter's input capacitance (gate cap from ngspice)"),
+        None => "C_inv = the reference inverter's input capacitance (no gate cap extracted)".into(),
+    };
     let rows = vec![
         vec!["Process".into(), format!("{} / {} @ {} V, corner {}", config.models.nmos, config.models.pmos, env.vdd, env.corner)],
         vec![
             "Reference inverter".into(),
             format!("Wn = {:.4} um, Wp = {:.4} um, Ln = {:.4} um, Lp = {:.4} um", unit.wn, unit.wp, unit.ln, unit.lp),
         ],
-        vec!["gamma = Wp / Wn".into(), format!("{:.4}", unit.gamma())],
-        vec!["Unit capacitance".into(), "C_inv = input capacitance of the reference inverter; all caps below are in C_inv".into()],
+        vec!["gamma = Wp / Wn".into(), format!("{:.4} (dimensionless)", unit.gamma())],
+        vec!["Unit capacitance".into(), c_inv],
         vec!["Unit drive".into(), "drive s = 1 drives like the reference inverter; widths = relative width x s x Wn (or Wp)".into()],
-        vec!["Output load".into(), format!("{} C_inv on every output port", sizing.cload_cinv)],
-        vec!["Input limit".into(), format!("heaviest primary input presents {} C_inv", sizing.cin_cinv)],
+        vec!["Output load".into(), format!("{} C_inv{} on each module output port; internal nets see only their fanout", sizing.cload_cinv, ff(sizing.cload_cinv))],
+        vec!["Input limit".into(), format!("heaviest primary input presents {} C_inv{}", sizing.cin_cinv, ff(sizing.cin_cinv))],
         vec!["Target stage effort".into(), format!("rho = {} (optimal stages N = round(log_rho F))", sizing.stage_effort)],
         vec!["Buffering".into(), buffer.map_or_else(|| "off".into(), |m| format!("{m:?}"))],
         vec!["Min width".into(), format!("{} um (narrower transistors are clamped up, marked *){snap}", env.min_width)],
-        vec!["Delay model".into(), "d = f + p per stage, in tau; FO4 inverter = 5 tau".into()],
+        vec!["Delay model".into(), "d = f + p per stage, in tau (1 FO4 = 5 tau); efforts g, f, F are dimensionless".into()],
     ];
     log_table("Sizing assumptions", &["parameter", "value"], &rows);
 }
@@ -104,6 +109,7 @@ pub fn log_cells(title: &str, m: &Module, config: &Config, unit: &UnitInverter) 
             format!("{:.3}", stage.parasitic(gamma)),
             cin.join(" / "),
             format!("{:.3}", exact * f),
+            unit.c_inv_ff.map_or("-".into(), |c| format!("{:.2}", exact * f * c)),
             format!("{exact:.3}"),
             widths(&wn),
             widths(&wp),
@@ -111,7 +117,7 @@ pub fn log_cells(title: &str, m: &Module, config: &Config, unit: &UnitInverter) 
     }
     log_table(
         &format!("{title}: every stage at f = C_out / s = {f:.3}, C_in(pin) = g x s"),
-        &["cell", "master", "g (per input)", "p", "C_in (C_inv)", "C_out (C_inv)", "drive s", "NMOS W (um)", "PMOS W (um)"],
+        &["cell", "master", "g (per input)", "p (tau)", "C_in (C_inv)", "C_out (C_inv)", "C_out (fF)", "drive s (x inv)", "NMOS W (um)", "PMOS W (um)"],
         &rows,
     );
     Ok(())
@@ -207,7 +213,7 @@ pub fn log_paths(
     }
     log_table(
         &format!("{title}: F = G x B x H, f = F^(1/N), N_opt = log_{} F, delay = N f + P", sizing.stage_effort),
-        &["output", "critical path", "N", "G", "B", "H", "F", "f", "N_opt", "added inv", "P", "delay (tau)"],
+        &["output", "critical path", "N", "G", "B", "H", "F", "f", "N_opt", "added inv", "P (tau)", "delay (tau)"],
         &rows,
     );
     Ok(())

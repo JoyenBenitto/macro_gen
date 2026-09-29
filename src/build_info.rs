@@ -19,7 +19,7 @@ pub fn features() -> &'static str {
     if cfg!(feature = "circt") { "circt" } else { "none" }
 }
 
-/// `macro_gen 0.1.0 (1a2b3c4d5e)`: stamped into every generated file.
+/// `macro_gen 0.2.0 (1a2b3c4d5e)`: stamped into every generated file.
 pub fn generator() -> String {
     format!("macro_gen {VERSION} ({GIT})")
 }

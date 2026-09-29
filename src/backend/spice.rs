@@ -155,7 +155,7 @@ mod tests {
         .unwrap()
     }
 
-    const UNIT: UnitInverter = UnitInverter { wn: 0.5, wp: 1.0, ln: 0.15, lp: 0.15 };
+    const UNIT: UnitInverter = UnitInverter { wn: 0.5, wp: 1.0, ln: 0.15, lp: 0.15, c_inv_ff: None };
 
     #[test]
     fn nand2_subckt_has_series_pulldown_and_parallel_pullup() {

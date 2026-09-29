@@ -15,10 +15,14 @@ use crate::passes::sizing::ATTR_DRIVE;
 /// The characterized reference inverter every stage is sized against.
 #[derive(Debug, Clone, Copy)]
 pub struct UnitInverter {
+    /// Widths and lengths, in um.
     pub wn: f64,
     pub wp: f64,
     pub ln: f64,
     pub lp: f64,
+    /// Input capacitance in fF (the physical value of 1 C_inv), when the
+    /// characterization produced gate capacitances.
+    pub c_inv_ff: Option<f64>,
 }
 
 impl UnitInverter {

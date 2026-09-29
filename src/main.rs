@@ -70,23 +70,18 @@ struct Args {
     build_dir: PathBuf,
 
     /// CIRCT flow: buffer every output to the delay-optimal
-    /// round(log_rho F) stages (rho = sizing.stage_effort) and write the
-    /// buffered netlist as structural Verilog (`verilog/<top>_buffered.v`). `invertible` (the
-    /// default) allows any number of added inverters, so an output may come
-    /// out inverted; `non-invertible` adds them in inv+inv pairs.
+    /// round(log_rho F) stages (rho = sizing.stage_effort). The written
+    /// netlists are then the buffered design. `invertible` (the default)
+    /// allows any number of added inverters, so an output may come out
+    /// inverted; `non-invertible` adds them in inv+inv pairs.
     #[arg(long, value_enum, value_name = "MODE", num_args = 0..=1, default_missing_value = "invertible")]
     add_buffer: Option<passes::buffer::BufferMode>,
 
-    /// CIRCT flow: write the sized (unbuffered) netlist as structural,
-    /// PD-clean Verilog: `verilog/<top>.v` plus black-box cell declarations
-    /// in `verilog/<top>_cells.v`.
+    /// CIRCT flow: also write the sized netlist as structural, PD clean
+    /// Verilog: `verilog/<top>.v` plus black-box cell declarations in
+    /// `verilog/<top>_cells.v`.
     #[arg(long)]
     emit_verilog: bool,
-
-    /// CIRCT flow: also write the buffered netlist as SPICE
-    /// (`spice/<top>_buffered.spice`). Implies `--add-buffer`.
-    #[arg(long)]
-    emit_buffered_spice: bool,
 }
 
 /// Peak resident set size (high-water mark), in kilobytes, read from
@@ -140,11 +135,9 @@ fn print_run_summary(elapsed: std::time::Duration) {
 /// Parses `config.circt`'s MLIR input into the netlist IR, runs the pass
 /// pipeline, then the CMOS backend: lowers the top module to
 /// pull-up/pull-down stages, sizes them by logical effort against the
-/// characterized reference inverter `unit`, and writes
-/// `spice/<top>.spice` (and `verilog/<top>.v` with `--emit-verilog`). With
-/// `--add-buffer` / `--emit-buffered-spice` it then buffers the outputs and
-/// writes `verilog/<top>_buffered.v` and optionally
-/// `spice/<top>_buffered.spice`. Always ends with `reports/<top>.toml`.
+/// characterized reference inverter `unit`, and buffers the outputs with
+/// `--add-buffer`. The final design is written once: `spice/<top>.spice`,
+/// `verilog/<top>.v` with `--emit-verilog`, and `reports/<top>.toml`.
 #[cfg(feature = "circt")]
 fn run_circt_flow(
     config: &Config,
@@ -205,15 +198,8 @@ fn run_circt_flow(
         sizing.cin_cinv,
         design.module(top).attrs.get(passes::sizing::ATTR_STAGE_EFFORT).map_or("-", String::as_str)
     );
-    let verilog_dir = args.build_dir.join("verilog");
     let m = design.module(top);
-    write(&layout.spice_dir, format!("{top_name}.spice"), backend::spice::render(m, config, &unit))?;
-    if args.emit_verilog {
-        write(&verilog_dir, format!("{top_name}.v"), backend::verilog::render(m))?;
-        write(&verilog_dir, format!("{top_name}_cells.v"), backend::verilog::render_cells(m))?;
-    }
-
-    let buffer_mode = args.add_buffer.or(args.emit_buffered_spice.then_some(BufferMode::Invertible));
+    let buffer_mode = args.add_buffer;
     let unbuffered = backend::report::metrics(m, unit.gamma()).map_err(|e| fail("Failed to measure design", &e))?;
     let plans = passes::buffer::plan(m, &params, sizing.stage_effort, buffer_mode.unwrap_or(BufferMode::Invertible))
         .map_err(|e| fail("Failed to plan buffering", &e))?;
@@ -225,7 +211,7 @@ fn run_circt_flow(
     };
     backend::tables::log_assumptions(config, &unit, buffer_mode);
     tables("unbuffered", m, Some(&plans))?;
-    let mut report = backend::report::Report::new(m, unit.gamma(), sizing.cload_cinv, sizing.cin_cinv, unbuffered, plans);
+    let mut report = backend::report::Report::new(m, &unit, sizing, unbuffered, plans);
 
     if let Some(mode) = buffer_mode {
         let mut buffering = passes::buffer_pipeline(mode, sizing.stage_effort, params);
@@ -235,11 +221,15 @@ fn run_circt_flow(
         let m = design.module(top);
         tables("buffered", m, None)?;
         report.set_buffered(backend::report::metrics(m, unit.gamma()).map_err(|e| fail("Failed to measure design", &e))?);
-        write(&verilog_dir, format!("{top_name}_buffered.v"), backend::verilog::render(m))?;
-        write(&verilog_dir, format!("{top_name}_buffered_cells.v"), backend::verilog::render_cells(m))?;
-        if args.emit_buffered_spice {
-            write(&layout.spice_dir, format!("{top_name}_buffered.spice"), backend::spice::render(m, config, &unit))?;
-        }
+    }
+
+    // One set of outputs: the final (buffered, if requested) design.
+    let m = design.module(top);
+    write(&layout.spice_dir, format!("{top_name}.spice"), backend::spice::render(m, config, &unit))?;
+    if args.emit_verilog {
+        let verilog_dir = args.build_dir.join("verilog");
+        write(&verilog_dir, format!("{top_name}.v"), backend::verilog::render(m))?;
+        write(&verilog_dir, format!("{top_name}_cells.v"), backend::verilog::render_cells(m))?;
     }
 
     backend::tables::log_summary(&report);
@@ -308,10 +298,10 @@ fn main() -> ExitCode {
         }
     }
 
-    let wants_backend = args.emit_verilog || args.add_buffer.is_some() || args.emit_buffered_spice;
+    let wants_backend = args.emit_verilog || args.add_buffer.is_some();
     if wants_backend && config.circt.is_none() {
         error!(
-            "--emit-verilog / --add-buffer / --emit-buffered-spice need a design, but '{}' has no \
+            "--emit-verilog and --add-buffer need a design, but '{}' has no \
              [circt] section (mlir_path, top_module)",
             args.config
         );
@@ -373,7 +363,8 @@ fn main() -> ExitCode {
     #[cfg(feature = "circt")]
     if config.circt.is_some() {
         let (ln, lp) = inverter::reference_lengths(&config);
-        let unit = backend::UnitInverter { wn, wp, ln, lp };
+        let c_inv_ff = inverter::input_capacitance_ff(&symbols, &config, wn, wp);
+        let unit = backend::UnitInverter { wn, wp, ln, lp, c_inv_ff };
         let layout = match characterization::paths::BuildLayout::new(build_dir) {
             Ok(l) => l,
             Err(e) => {

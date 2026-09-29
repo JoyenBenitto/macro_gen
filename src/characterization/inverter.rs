@@ -226,6 +226,18 @@ pub fn reference_lengths(config: &Config) -> (f64, f64) {
     )
 }
 
+/// Estimated input capacitance of the sized reference inverter, in fF: the
+/// gate capacitance (`cgg`) ngspice extracted for each device at the
+/// characterization bias, where both devices are `nmos_w` wide, scaled
+/// linearly to `wn` and `wp`. `None` if `cgg` is missing.
+pub fn input_capacitance_ff(symbols: &SymbolTable, config: &Config, wn: f64, wp: f64) -> Option<f64> {
+    let w_char = config.reference_inverter.nmos_w;
+    let cgg_n = symbols.get("nmos.cgg")?;
+    let cgg_p = symbols.get("pmos.cgg")?;
+    let c = (cgg_n * wn + cgg_p * wp) / w_char;
+    (c > 0.0).then_some(c * 1e15)
+}
+
 /// Returns Wp/Wn as the ratio of the two devices' simulated drain currents
 /// (`id`) at the normalize stage's characterization bias — both devices
 /// share the same W/L there, so the ratio is meaningful without needing
