@@ -1,0 +1,185 @@
+//! Transistor-level SPICE netlist of the sized top module: one `.subckt`
+//! per distinct (stage, drive), and a `.subckt <top>` instantiating them.
+//! Supplies are explicit `VDD`/`GND` subckt pins.
+//!
+//! Physical widths are `relative width * drive * W_ref` (NMOS: `Wn` of the
+//! reference inverter, PMOS: its `Wp`), clamped to `min_width` and snapped
+//! to multiples of it when `w_is_multiple_of_w_min` is set.
+
+use crate::backend::{UnitInverter, cell_master, net_name, sanitize};
+use crate::characterization::inverter::quantize;
+use crate::cmos::{CmosStage, Fet, Node};
+use crate::config::Config;
+use crate::ir::{IrError, Module};
+use crate::ir::cell::GATE_OUTPUT_PIN;
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+
+/// Renders the whole deck for `m`.
+pub fn render(m: &Module, config: &Config, unit: &UnitInverter) -> Result<String, IrError> {
+    let env = &config.environment;
+    let snap = config.reference_inverter.w_is_multiple_of_w_min;
+    let clamped = std::cell::Cell::new(0usize);
+    let width = |rel: f64, drive: f64, w_ref: f64| {
+        let w = rel * drive * w_ref;
+        if w < env.min_width {
+            clamped.set(clamped.get() + 1);
+        }
+        quantize(w, env.min_width, snap).max(env.min_width)
+    };
+
+    let mut masters: BTreeMap<String, String> = BTreeMap::new();
+    let mut instances = String::new();
+    for (id, cell) in m.cells().iter() {
+        let (master, stage, drive) = cell_master(m, id)?;
+        if !masters.contains_key(&master) {
+            let g: Vec<String> =
+                (0..stage.n_inputs).map(|i| format!("{:.3}", stage.logical_effort(i, unit.gamma()))).collect();
+            let mut body = format!(
+                "* {} drive {drive:.2}: g = [{}], p = {:.3}\n",
+                stage.name,
+                g.join(", "),
+                stage.parasitic(unit.gamma())
+            );
+            body += &subckt(&master, stage, config, unit, |rel, is_p| {
+                width(rel, drive, if is_p { unit.wp } else { unit.wn })
+            });
+            masters.insert(master.clone(), body);
+        }
+        let nets: Vec<String> = cell.pins.iter().map(|&p| net_name(m, m.pins()[p].net)).collect();
+        writeln!(instances, "X{} {} VDD GND {master}", sanitize(&cell.name), nets.join(" ")).unwrap();
+    }
+
+    if clamped.get() > 0 {
+        log::warn!(
+            "{} transistor(s) in '{}' were sized below min_width and clamped up; their stages are \
+             slower and load their drivers more than logical effort planned (raise sizing.cin_cinv)",
+            clamped.get(),
+            m.name
+        );
+    }
+
+    let ports: Vec<String> = m.ports().iter().map(|(_, p)| sanitize(&p.name)).collect();
+    let top = sanitize(&m.name);
+    let mut out = String::new();
+    writeln!(out, "* {top}: CMOS netlist sized by logical effort (macro_gen)").unwrap();
+    writeln!(
+        out,
+        "* reference inverter: Wn={:.4}um Wp={:.4}um (gamma={:.4}), Ln={:.4}um Lp={:.4}um",
+        unit.wn,
+        unit.wp,
+        unit.gamma(),
+        unit.ln,
+        unit.lp
+    )
+    .unwrap();
+    if let Some(f) = m.attrs.get(crate::passes::sizing::ATTR_STAGE_EFFORT) {
+        writeln!(out, "* stage effort f = {f}").unwrap();
+    }
+    for (k, v) in m.attrs.iter().filter(|(k, _)| k.starts_with("macro_gen.inverted.")) {
+        writeln!(out, "* {k} = {v}").unwrap();
+    }
+    writeln!(out, "\n.lib {} {}\n", env.include_path, env.corner).unwrap();
+    for body in masters.values() {
+        out.push_str(body);
+        out.push('\n');
+    }
+    writeln!(out, ".subckt {top} {} VDD GND", ports.join(" ")).unwrap();
+    out.push_str(&instances);
+    writeln!(out, ".ends {top}").unwrap();
+    Ok(out)
+}
+
+/// One stage's `.subckt`: pins `in0..inN y VDD GND`. `width(rel, is_pmos)`
+/// gives the physical width of a transistor of relative width `rel`.
+fn subckt(
+    name: &str,
+    stage: &CmosStage,
+    config: &Config,
+    unit: &UnitInverter,
+    width: impl Fn(f64, bool) -> f64,
+) -> String {
+    let inputs: Vec<String> = (0..stage.n_inputs).map(crate::ir::GateType::input_pin_name).collect();
+    let mut s = String::new();
+    writeln!(s, ".subckt {name} {} {GATE_OUTPUT_PIN} VDD GND", inputs.join(" ")).unwrap();
+    let node = |n: Node, rail: &str, prefix: &str| match n {
+        Node::Out => GATE_OUTPUT_PIN.to_string(),
+        Node::Rail => rail.to_string(),
+        Node::Internal(i) => format!("{prefix}{i}"),
+    };
+    let mut emit = |fets: Vec<Fet>, is_p: bool| {
+        let (tag, rail, prefix, model, l) = if is_p {
+            ("P", "VDD", "np", &config.models.pmos, unit.lp)
+        } else {
+            ("N", "GND", "nn", &config.models.nmos, unit.ln)
+        };
+        for (i, f) in fets.iter().enumerate() {
+            writeln!(
+                s,
+                "XM{tag}{i} {} {} {} {rail} {model} L={l:.4} W={:.4} nf=1 mult=1",
+                node(f.upper, rail, prefix),
+                inputs[f.input],
+                node(f.lower, rail, prefix),
+                width(f.width, is_p)
+            )
+            .unwrap();
+        }
+    };
+    emit(stage.nmos(), false);
+    emit(stage.pmos(), true);
+    writeln!(s, ".ends {name}").unwrap();
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cmos::CmosStage;
+
+    fn config() -> Config {
+        toml::from_str(
+            r#"
+            [environment]
+            vdd = 1.8
+            min_length = 0.15
+            min_width = 0.42
+            include_path = "models.lib"
+            corner = "tt"
+            [models]
+            nmos = "nfet"
+            pmos = "pfet"
+            [reference_inverter]
+            name = "inv"
+            nmos_w = 0.42
+            nmos_l = 0.15
+            inverter_threshold = 0.9
+            "#,
+        )
+        .unwrap()
+    }
+
+    const UNIT: UnitInverter = UnitInverter { wn: 0.5, wp: 1.0, ln: 0.15, lp: 0.15 };
+
+    #[test]
+    fn nand2_subckt_has_series_pulldown_and_parallel_pullup() {
+        let cfg = config();
+        let s = subckt("nand2_x2p00", &CmosStage::nand(2), &cfg, &UNIT, |rel, p| rel * 2.0 * if p { 1.0 } else { 0.5 });
+        assert_eq!(
+            s,
+            ".subckt nand2_x2p00 in0 in1 y VDD GND\n\
+             XMN0 y in0 nn0 GND nfet L=0.1500 W=2.0000 nf=1 mult=1\n\
+             XMN1 nn0 in1 GND GND nfet L=0.1500 W=2.0000 nf=1 mult=1\n\
+             XMP0 y in0 VDD VDD pfet L=0.1500 W=2.0000 nf=1 mult=1\n\
+             XMP1 y in1 VDD VDD pfet L=0.1500 W=2.0000 nf=1 mult=1\n\
+             .ends nand2_x2p00\n"
+        );
+    }
+
+    #[test]
+    fn inverter_subckt() {
+        let cfg = config();
+        let s = subckt("inv_x1p00", &CmosStage::inv(), &cfg, &UNIT, |rel, p| rel * if p { 1.0 } else { 0.5 });
+        assert!(s.contains("XMN0 y in0 GND GND nfet L=0.1500 W=0.5000"));
+        assert!(s.contains("XMP0 y in0 VDD VDD pfet L=0.1500 W=1.0000"));
+    }
+}

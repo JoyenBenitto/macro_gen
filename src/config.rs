@@ -10,6 +10,35 @@ pub struct Config {
     /// to today's single-inverter flow untouched.
     #[serde(default)]
     pub circt: Option<CirctInput>,
+    /// Logical-effort sizing targets for the CIRCT flow's CMOS backend.
+    /// Required whenever `[circt]` is present.
+    #[serde(default)]
+    pub sizing: Option<Sizing>,
+}
+
+fn default_cin_cinv() -> f64 {
+    1.0
+}
+
+fn default_stage_effort() -> f64 {
+    4.0
+}
+
+/// Capacitances are in units of `C_inv`, the input capacitance of the
+/// characterized reference inverter.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct Sizing {
+    /// Load on every output port.
+    pub cload_cinv: f64,
+    /// Largest capacitance any primary input may present. Defaults to 1
+    /// (a reference inverter's worth).
+    #[serde(default = "default_cin_cinv")]
+    pub cin_cinv: f64,
+    /// Target effort per stage when buffering: outputs are buffered to
+    /// `round(log_{stage_effort}(F))` stages. Defaults to 4.
+    #[serde(default = "default_stage_effort")]
+    pub stage_effort: f64,
 }
 
 #[derive(Debug, Deserialize, Clone)]

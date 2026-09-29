@@ -18,7 +18,7 @@ pub mod module;
 #[cfg(feature = "circt")]
 pub mod from_circt;
 
-pub use arena::{CellId, ModuleId, NetId, PinId, PortId};
+pub use arena::{CellId, ModuleId, NetId, PinId, PortId, StageId};
 pub use cell::{Cell, CellKind, GateType};
 pub use design::Design;
 pub use error::IrError;

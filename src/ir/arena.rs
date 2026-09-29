@@ -57,6 +57,11 @@ arena_id!(
     /// A module boundary port.
     PortId
 );
+arena_id!(
+    /// A CMOS stage (pull-up/pull-down network) owned by a module, shared by
+    /// every [`crate::ir::CellKind::Cmos`] cell built from it.
+    StageId
+);
 
 /// `Vec<Option<T>>` keyed by a typed ID. See the module docs.
 #[derive(Clone)]

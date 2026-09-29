@@ -3,7 +3,7 @@
 //! Covers: `environment` field positivity and range (vdd, min_length, min_width),
 //! the process corner allow-list, non-empty model names, reference-inverter sizing
 //! against the process minimums, the switching-threshold range, and sizing-sweep
-//! parameter sanity.
+//! parameter sanity, and the `[sizing]` section a CIRCT run needs.
 
 use crate::config::Config;
 use std::path::Path;
@@ -49,6 +49,12 @@ pub enum ValidationError {
     CirctMlirPathMissing(String),
     #[error("circt.top_module must not be empty")]
     CirctTopModuleEmpty,
+    #[error("a [circt] run needs a [sizing] section (at least `cload_cinv`)")]
+    SizingMissing,
+    #[error("sizing.{0} must be positive, got {1}")]
+    SizingNotPositive(&'static str, f64),
+    #[error("sizing.stage_effort must be greater than 1, got {0}")]
+    StageEffortTooSmall(f64),
 }
 
 /// The full set of validation failures collected by [`validate`].
@@ -150,6 +156,20 @@ pub fn validate(config: &Config) -> Result<(), ValidationErrors> {
         }
         if circt.top_module.trim().is_empty() {
             errors.push(ValidationError::CirctTopModuleEmpty);
+        }
+        if config.sizing.is_none() {
+            errors.push(ValidationError::SizingMissing);
+        }
+    }
+
+    if let Some(sizing) = &config.sizing {
+        for (field, value) in [("cload_cinv", sizing.cload_cinv), ("cin_cinv", sizing.cin_cinv)] {
+            if value <= 0.0 {
+                errors.push(ValidationError::SizingNotPositive(field, value));
+            }
+        }
+        if sizing.stage_effort <= 1.0 {
+            errors.push(ValidationError::StageEffortTooSmall(sizing.stage_effort));
         }
     }
 

@@ -24,7 +24,7 @@ pub enum GenerateError {
 
 /// Snaps `value` to the nearest positive integer multiple of `unit` when
 /// `enabled`; otherwise passes it through unchanged.
-fn quantize(value: f64, unit: f64, enabled: bool) -> f64 {
+pub(crate) fn quantize(value: f64, unit: f64, enabled: bool) -> f64 {
     if !enabled || unit <= 0.0 {
         return value;
     }
@@ -176,7 +176,6 @@ pub fn generate_deck_in_layout(
 ) -> Result<(f64, f64), GenerateError> {
     let ri = &config.reference_inverter;
     let min_width = config.environment.min_width;
-    let min_length = config.environment.min_length;
 
     if ri.pmos_l.is_none() {
         warn!(
@@ -184,8 +183,7 @@ pub fn generate_deck_in_layout(
             ri.nmos_l
         );
     }
-    let ln = quantize(ri.nmos_l, min_length, ri.l_is_multiple_of_l_min);
-    let lp = quantize(ri.pmos_l_or_default(), min_length, ri.l_is_multiple_of_l_min);
+    let (ln, lp) = reference_lengths(config);
 
     let ratio = id_based_w_l_n_p_ratio(symbols);
 
@@ -215,6 +213,17 @@ pub fn generate_deck_in_layout(
     info!("Wrote inverter SPICE deck to {}", out_path.display());
 
     Ok((wn, wp))
+}
+
+/// The reference inverter's `(Ln, Lp)` as actually used, after snapping to
+/// `min_length` when `l_is_multiple_of_l_min` is set.
+pub fn reference_lengths(config: &Config) -> (f64, f64) {
+    let ri = &config.reference_inverter;
+    let min_length = config.environment.min_length;
+    (
+        quantize(ri.nmos_l, min_length, ri.l_is_multiple_of_l_min),
+        quantize(ri.pmos_l_or_default(), min_length, ri.l_is_multiple_of_l_min),
+    )
 }
 
 /// Returns Wp/Wn as the ratio of the two devices' simulated drain currents

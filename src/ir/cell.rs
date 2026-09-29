@@ -1,6 +1,6 @@
 //! Hypergraph nodes: cells, and the primitive gate set they can be.
 
-use crate::ir::arena::{ModuleId, PinId};
+use crate::ir::arena::{ModuleId, PinId, StageId};
 use std::collections::BTreeMap;
 
 /// A node in a module's hypergraph: a primitive gate or an instance of
@@ -20,6 +20,10 @@ pub enum CellKind {
     Gate(GateType),
     /// Hierarchy: an instance of another module in the same [`crate::ir::Design`].
     Instance(ModuleId),
+    /// A transistor-level CMOS stage (see [`crate::cmos`]) owned by the
+    /// module, produced by lowering gates (`passes::cmos_map`). Same pin
+    /// convention as a gate: `in0..inN`, then `y`.
+    Cmos(StageId),
 }
 
 /// The primitive gate set. `comb`'s ops are N-ary in MLIR; wider

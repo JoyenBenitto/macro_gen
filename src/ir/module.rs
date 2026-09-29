@@ -6,7 +6,8 @@
 //! methods here, which keep both sides in sync; [`Module::verify`] checks
 //! that they still are.
 
-use crate::ir::arena::{Arena, CellId, ModuleId, NetId, PinId, PortId};
+use crate::cmos::CmosStage;
+use crate::ir::arena::{Arena, CellId, ModuleId, NetId, PinId, PortId, StageId};
 use crate::ir::cell::{Cell, CellKind, GATE_OUTPUT_PIN, GateType};
 use crate::ir::error::IrError;
 use std::collections::BTreeMap;
@@ -70,6 +71,7 @@ pub struct Module {
     cells: Arena<CellId, Cell>,
     nets: Arena<NetId, Net>,
     pins: Arena<PinId, Pin>,
+    stages: Arena<StageId, CmosStage>,
 }
 
 impl Module {
@@ -81,6 +83,7 @@ impl Module {
             cells: Arena::default(),
             nets: Arena::default(),
             pins: Arena::default(),
+            stages: Arena::default(),
         }
     }
 
@@ -97,6 +100,17 @@ impl Module {
     }
     pub fn pins(&self) -> &Arena<PinId, Pin> {
         &self.pins
+    }
+    pub fn stages(&self) -> &Arena<StageId, CmosStage> {
+        &self.stages
+    }
+
+    /// The stage behind a [`CellKind::Cmos`] cell.
+    pub fn cell_stage(&self, cell: CellId) -> Option<&CmosStage> {
+        match self.cells[cell].kind {
+            CellKind::Cmos(s) => self.stages.get(s),
+            _ => None,
+        }
     }
 
     /// Tagged `macro_gen.cell = "complex"` in the input: build the whole
@@ -199,6 +213,23 @@ impl Module {
         self.add_cell(name.into(), CellKind::Gate(gate), &spec)
     }
 
+    /// Registers a CMOS stage, reusing an identical one if already present.
+    pub fn add_stage(&mut self, stage: CmosStage) -> StageId {
+        if let Some((id, _)) = self.stages.iter().find(|(_, s)| **s == stage) {
+            return id;
+        }
+        self.stages.alloc(stage)
+    }
+
+    /// Adds a cell built from `stage`, with unconnected pins `in0..inN` and `y`.
+    pub fn add_cmos_cell(&mut self, name: impl Into<String>, stage: StageId) -> CellId {
+        let mut spec: Vec<(String, Direction)> = (0..self.stages[stage].n_inputs)
+            .map(|i| (GateType::input_pin_name(i), Direction::Input))
+            .collect();
+        spec.push((GATE_OUTPUT_PIN.to_string(), Direction::Output));
+        self.add_cell(name.into(), CellKind::Cmos(stage), &spec)
+    }
+
     /// Adds an instance of `target` with one unconnected pin per entry of
     /// `ports` (the target's port names/directions, in order). Prefer
     /// [`crate::ir::Design::add_instance`], which reads them from the target.
@@ -268,6 +299,7 @@ impl Module {
             }
             CellKind::Gate(old) => old.library_name(),
             CellKind::Instance(_) => "a module instance",
+            CellKind::Cmos(_) => "a CMOS stage",
         };
         Err(IrError::GateArityMismatch(c.name.clone(), from, gate.library_name()))
     }
@@ -339,16 +371,18 @@ impl Module {
         }
 
         for (_, cell) in self.cells.iter() {
-            if let CellKind::Gate(g) = cell.kind {
-                let inputs = cell.pins.iter().filter(|&&p| self.pins[p].dir == Direction::Input).count();
-                let outputs = cell.pins.len() - inputs;
-                if inputs != g.num_inputs() || outputs != 1 {
-                    return fail(format!(
-                        "{} cell '{}' has {inputs} input / {outputs} output pins",
-                        g.library_name(),
-                        cell.name
-                    ));
-                }
+            let (kind, expected) = match cell.kind {
+                CellKind::Gate(g) => (g.library_name(), g.num_inputs()),
+                CellKind::Cmos(s) => match self.stages.get(s) {
+                    Some(stage) => (stage.name.as_str(), stage.n_inputs),
+                    None => return fail(format!("cell '{}' uses missing stage {s:?}", cell.name)),
+                },
+                CellKind::Instance(_) => continue,
+            };
+            let inputs = cell.pins.iter().filter(|&&p| self.pins[p].dir == Direction::Input).count();
+            let outputs = cell.pins.len() - inputs;
+            if inputs != expected || outputs != 1 {
+                return fail(format!("{kind} cell '{}' has {inputs} input / {outputs} output pins", cell.name));
             }
         }
         Ok(())

@@ -22,6 +22,8 @@ pub enum IrError {
     NetInUse(String),
     #[error("cell '{0}' cannot change from {1} to {2}: different number of pins")]
     GateArityMismatch(String, &'static str, &'static str),
+    #[error("unsupported: {0}")]
+    Unsupported(String),
     #[error("module '{0}' failed verification: {1}")]
     Verify(String, String),
 }

@@ -33,3 +33,10 @@ top_module = "and_or_chain"
 
 # Custom cells are selected in the MLIR itself: and_or_chain.mlir tags its
 # hw.module with `macro_gen.cell = "complex"`.
+
+# Logical-effort sizing of the CMOS backend. Capacitances are in units of
+# C_inv, the input capacitance of the reference inverter above.
+[sizing]
+cload_cinv = 64.0   # load on every output port
+cin_cinv = 1.0      # largest capacitance any input may present
+stage_effort = 4.0  # --add-buffer targets round(log4(F)) stages

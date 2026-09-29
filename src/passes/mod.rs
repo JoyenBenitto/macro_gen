@@ -2,7 +2,10 @@
 //! [`PassManager`] runs a pipeline of them in order, verifying the IR after
 //! each one so a broken invariant is blamed on the pass that broke it.
 
+pub mod buffer;
+pub mod cmos_map;
 pub mod dead_logic;
+pub mod sizing;
 
 use crate::ir::{Design, IrError};
 use log::info;
@@ -71,6 +74,21 @@ impl PassManager {
 pub fn default_pipeline() -> PassManager {
     let mut pm = PassManager::new();
     pm.add(dead_logic::DeadLogicElimination);
+    pm
+}
+
+/// Lowers the top module to CMOS stages and sizes them by logical effort.
+pub fn backend_pipeline(params: sizing::SizingParams) -> PassManager {
+    let mut pm = PassManager::new();
+    pm.add(cmos_map::CmosMap).add(sizing::LogicalEffortSizing(params));
+    pm
+}
+
+/// Adds output buffers up to `log_rho(F)` stages, then re-sizes. Runs after
+/// [`backend_pipeline`].
+pub fn buffer_pipeline(mode: buffer::BufferMode, rho: f64, params: sizing::SizingParams) -> PassManager {
+    let mut pm = PassManager::new();
+    pm.add(buffer::BufferInsertion { mode, rho, params }).add(sizing::LogicalEffortSizing(params));
     pm
 }
 
