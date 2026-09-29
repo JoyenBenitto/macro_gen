@@ -24,7 +24,7 @@ wl_sweep_sample_count = 10
 
 # Capacitances are in units of C_inv, the reference inverter's input capacitance.
 [sizing]
-cload_cinv = 64.0  # load on every output
+cload_cinv = 64.0  # load on each module output port (internal nets see only their fanout)
 cin_cinv = 1.0     # largest capacitance any input may present
 stage_effort = 4.0 # buffering targets round(log4 F) stages
 
