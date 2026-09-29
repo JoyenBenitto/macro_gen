@@ -2,9 +2,8 @@
 """Runs macro_gen over the benchmark suite and tabulates the results.
 
 Each benchmark is a directory benchmarks/<name>/ holding <name>.mlir and its
-config <name>.toml. The runner runs every config with --emit-verilog,
---add-buffer <mode> and --emit-buffered-spice, reads the report each run
-writes, and prints a summary table (also saved to benchmarks/build/summary.md).
+config <name>.toml. The runner runs every config with --emit-verilog and
+--add-buffer <mode>, reads the report each run writes, and prints a summary table (also saved to benchmarks/build/summary.md).
 Per design outputs and run logs go to benchmarks/build/<name>/.
 
 Needs CIRCT_DIR set. Each run characterizes the reference inverter with
@@ -43,7 +42,7 @@ def run_one(binary: Path, config: Path, out: Path, mode: str) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     cmd = [
         str(binary), "--config", str(config), "--build-dir", str(out),
-        "--emit-verilog", "--add-buffer", mode, "--emit-buffered-spice",
+        "--emit-verilog", "--add-buffer", mode,
     ]
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     log = proc.stdout + proc.stderr
@@ -70,7 +69,7 @@ def row(result: dict) -> list[str]:
     return [
         r["top"],
         "ok",
-        f'{r["cload_cinv"]:g}',
+        f'{r["sizing"]["cload_cinv"]:g}',
         str(len(outs)),
         f'{ub["cells"]} → {b["cells"]}',
         f'{ub["transistors"]} → {b["transistors"]}',
