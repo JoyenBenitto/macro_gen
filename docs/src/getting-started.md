@@ -27,14 +27,29 @@ and sizing-sweep parameters.
 
 By default, output lands under `./build/`:
 
-- `./build/spice/` — the final generated spice deck(s).
-- `./build/.macro_gen_project/` — intermediate/scratch files: characterization decks,
+- `./build/spice/`: the final generated SPICE decks.
+- `./build/.macro_gen_project/`: intermediate files such as characterization decks,
   sizing-sweep candidates, and CSV reports.
 
 Use `--build-dir` to point elsewhere; see [CLI Reference](./cli-reference.md).
 
+## 4. Size a design
+
+Build with the `circt` feature (see [CMOS Backend](./cmos-backend.md#building))
+and run one of the benchmarks:
+
+```bash
+$ cargo build --release --features circt
+$ ./target/release/macro_gen --config benchmarks/c17/c17.toml --emit-verilog --add-buffer
+```
+
+The log walks through every sizing step, and the netlists land under
+`./build/spice/` and `./build/verilog/`.
+
 ## Next steps
 
+- [CMOS Backend](./cmos-backend.md) for how designs are sized.
+- [Benchmarks](./benchmarks.md) for the benchmark suite and results.
 - [CLI Reference](./cli-reference.md) for all flags.
 - [Logging](./logging.md) to see per-iteration characterization/sizing-sweep detail.
 - [API Reference](./api-reference.md) for the internal module structure.

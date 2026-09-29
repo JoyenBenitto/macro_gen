@@ -1,0 +1,13 @@
+* throwaway deck for device-parameter extraction; not for user inspection
+Vdd VDD GND 1.8
+Vgn gate_n GND 1.8
+Vdn drain_n GND 0.9
+XNMOS drain_n gate_n GND GND sky130_fd_pr__nfet_01v8 w=0.42 l=0.15
+
+Vgp gate_p GND 0
+Vdp drain_p GND 0.9
+XPMOS drain_p gate_p VDD VDD sky130_fd_pr__pfet_01v8 w=0.42 l=0.15
+
+.lib /home/joyenbenitto/pdk/open_pdks/sources/sky130_fd_pr/combined_models/sky130.lib.spice tt
+.GLOBAL GND
+.end

@@ -1,0 +1,34 @@
+# maj3: Majority / full adder carry as a complex cell, plus an inverter.
+#
+#   macro_gen --config benchmarks/maj3/maj3.toml --emit-verilog --add-buffer
+
+[environment]
+vdd = 1.8
+min_length = 0.15 # um
+min_width = 0.42  # um
+include_path = "/home/joyenbenitto/pdk/open_pdks/sources/sky130_fd_pr/combined_models/sky130.lib.spice"
+corner = "tt"
+
+[models]
+nmos = "sky130_fd_pr__nfet_01v8"
+pmos = "sky130_fd_pr__pfet_01v8"
+
+[reference_inverter]
+name = "sky130_fd_pr__inv_1"
+nmos_w = 0.42
+nmos_l = 0.15
+pmos_l = 0.15
+inverter_threshold = 0.9
+wl_sweep_granularity = 0.42
+wl_sweep_sample_count = 10
+
+# Capacitances are in units of C_inv, the reference inverter's input capacitance.
+[sizing]
+cload_cinv = 64.0  # load on each module output port (internal nets see only their fanout)
+cin_cinv = 1.0     # largest capacitance any input may present
+stage_effort = 4.0 # buffering targets round(log4 F) stages
+
+# mlir_path is relative to this file.
+[circt]
+mlir_path = "maj3.mlir"
+top_module = "maj3"
