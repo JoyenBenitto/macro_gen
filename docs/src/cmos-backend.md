@@ -25,7 +25,7 @@ A CIRCT run is driven entirely by its config. On top of the usual
 ```toml
 # Capacitances are in units of C_inv, the reference inverter's input capacitance.
 [sizing]
-cload_cinv = 64.0  # load on every output
+cload_cinv = 64.0  # load on each module output port
 cin_cinv = 1.0     # largest capacitance any input may present (default 1)
 stage_effort = 4.0 # buffering targets round(log4 F) stages (default 4)
 
@@ -41,10 +41,12 @@ $ ./target/release/macro_gen --config benchmarks/c17/c17.toml --emit-verilog --a
 
 | Flag | Effect |
 | --- | --- |
-| `--emit-verilog` | Write the sized netlist as structural Verilog. |
-| `--add-buffer` | Buffer every output to the optimal number of stages and write the buffered Verilog. Same as `--add-buffer invertible`. |
+| `--emit-verilog` | Also write the sized netlist as structural Verilog. |
+| `--add-buffer` | Buffer every output to the optimal number of stages. Same as `--add-buffer invertible`. |
 | `--add-buffer non-invertible` | Buffer with inverters in pairs so every output keeps its polarity. |
-| `--emit-buffered-spice` | Also write the buffered SPICE netlist. Implies `--add-buffer`. |
+
+Buffering changes the design in place: the SPICE, Verilog and report describe
+the buffered design, under the same file and module names as an unbuffered run.
 
 The backend flags need a `[circt]` section; without one macro_gen stops with an
 error before characterizing anything.
@@ -95,16 +97,13 @@ inverters are added and `f` drops to 3.36.
 ```
 <build-dir>/
   spice/
-    inv.spice                  reference inverter
-    <top>.spice                sized netlist (always)
-    <top>_buffered.spice       --emit-buffered-spice
+    inv.spice        reference inverter
+    <top>.spice      sized netlist (always)
   verilog/
-    <top>.v                    --emit-verilog
-    <top>_cells.v
-    <top>_buffered.v           --add-buffer
-    <top>_buffered_cells.v
+    <top>.v          structural netlist (--emit-verilog)
+    <top>_cells.v    cell master declarations (--emit-verilog)
   reports/
-    <top>.toml                 sizing and delay report (always)
+    <top>.toml       sizing and delay report (always)
 ```
 
 **SPICE.** One `.subckt` per distinct stage and drive, named
@@ -120,11 +119,27 @@ escaped identifiers. Cell masters carry the same names as the SPICE
 subcircuits so the two line up for LVS, and `*_cells.v` declares them as
 `(* blackbox *)` modules.
 
-**Report.** `reports/<top>.toml` holds the generator version, cell and
-transistor counts, stage effort and worst delay before and after buffering,
-and each output's logic stages, path effort, added inverters and delay.
+**Report.** `reports/<top>.toml` holds the generator version, a `[units]`
+table, the reference inverter (µm, γ and C_inv in fF), the sizing targets in
+both C_inv and fF, cell and transistor counts, stage effort and worst delay (τ
+and FO4) before and after buffering, and each output's logic stages, path
+effort, added inverters and delay. Every key carries its unit as a suffix
+(`_um`, `_ff`, `_cinv`, `_tau`, `_fo4`); efforts and γ are dimensionless.
 
 Every generated file is stamped with the macro_gen version, commit and time.
+
+## Units
+
+| Quantity | Unit | Meaning |
+| --- | --- | --- |
+| Width, length | µm | Physical transistor dimensions. |
+| Capacitance | C_inv | Input capacitance of the reference inverter. Its physical value in fF is estimated from the gate capacitance (`cgg`) ngspice extracts during characterization, scaled to the inverter's Wn and Wp. |
+| Drive | × inverter | A drive of 1 conducts like the reference inverter. |
+| Delay | τ | Logical effort delay unit. An FO4 inverter is 5 τ. |
+| Effort | none | `g`, `h`, `f`, `F`, `G`, `B`, `H` and γ are ratios. |
+
+Delays are not yet converted to picoseconds; that needs a simulated FO4
+inverter to calibrate τ.
 
 ## Sizing log
 

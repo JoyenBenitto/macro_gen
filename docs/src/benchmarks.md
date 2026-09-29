@@ -50,7 +50,7 @@ $ benchmarks/run.py --mode non-invertible    # keep output polarity
 ```
 
 The runner builds macro_gen (`--release --features circt`) and runs every
-config with `--emit-verilog --add-buffer <mode> --emit-buffered-spice`,
+config with `--emit-verilog --add-buffer <mode>`,
 several at a time (`-j`). Each run characterizes the reference inverter in
 ngspice, which takes about 40 seconds. It then reads each run's report and
 prints a summary table, which it also writes to `benchmarks/build/summary.md`.

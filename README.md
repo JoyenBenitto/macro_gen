@@ -45,7 +45,7 @@ The design and sizing targets live in the config:
 
 ```toml
 [sizing]
-cload_cinv = 64.0  # output load, in units of the inverter's input capacitance
+cload_cinv = 64.0  # load on each module output port, in units of the inverter's input capacitance
 cin_cinv = 1.0     # largest input capacitance
 stage_effort = 4.0
 
