@@ -167,11 +167,7 @@ pub fn generate_deck(
 }
 
 /// Same as [`generate_deck`], but takes an already-resolved [`BuildLayout`]
-/// instead of a raw `build_dir`. Split out so
-/// [`crate::characterization::custom_sizing::InverterSizer`] (dispatched
-/// to from [`crate::sizing::size_netlist`], which already has a
-/// `BuildLayout` for the whole run) can reuse this sizing flow without
-/// re-resolving/re-creating the output directories.
+/// instead of a raw `build_dir`.
 pub fn generate_deck_in_layout(
     config: &Config,
     layout: &BuildLayout,

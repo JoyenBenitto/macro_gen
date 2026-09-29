@@ -49,8 +49,6 @@ pub enum ValidationError {
     CirctMlirPathMissing(String),
     #[error("circt.top_module must not be empty")]
     CirctTopModuleEmpty,
-    #[error("custom_cells.names contains an empty/blank entry")]
-    CustomCellNameEmpty,
 }
 
 /// The full set of validation failures collected by [`validate`].
@@ -154,16 +152,6 @@ pub fn validate(config: &Config) -> Result<(), ValidationErrors> {
             errors.push(ValidationError::CirctTopModuleEmpty);
         }
     }
-
-    if config.custom_cells.names.iter().any(|n| n.trim().is_empty()) {
-        errors.push(ValidationError::CustomCellNameEmpty);
-    }
-
-    // Note: whether each custom_cells name actually resolves against a
-    // parsed hw.module/hw.instance can't be checked here -- the netlist
-    // doesn't exist until after CIRCT parsing runs. That's a second-phase
-    // check in `sizing::size_netlist` (`SizingError::CustomCellUnknown`),
-    // using the same "collect and report" spirit as this function.
 
     if errors.is_empty() {
         Ok(())

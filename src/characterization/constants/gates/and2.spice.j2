@@ -1,7 +1,0 @@
-{# AND2 = NAND2 + INV, matching gate_library's and2 g/p (sum of both stages). #}
-XMPA{{ instance_name }} n_{{ instance_name }}_pre {{ in_nets[0] }} VDD VDD {{ model_pmos }} L={{ lp }} W={{ wp }} nf=1 mult=1
-XMPB{{ instance_name }} n_{{ instance_name }}_pre {{ in_nets[1] }} VDD VDD {{ model_pmos }} L={{ lp }} W={{ wp }} nf=1 mult=1
-XMNA{{ instance_name }} n_{{ instance_name }}_pre {{ in_nets[0] }} n_{{ instance_name }}_stack GND {{ model_nmos }} L={{ ln }} W={{ wn }} nf=1 mult=1
-XMNB{{ instance_name }} n_{{ instance_name }}_stack {{ in_nets[1] }} GND GND {{ model_nmos }} L={{ ln }} W={{ wn }} nf=1 mult=1
-XMNI{{ instance_name }} {{ out_net }} n_{{ instance_name }}_pre GND GND {{ model_nmos }} L={{ ln }} W={{ wn }} nf=1 mult=1
-XMPI{{ instance_name }} {{ out_net }} n_{{ instance_name }}_pre VDD VDD {{ model_pmos }} L={{ lp }} W={{ wp }} nf=1 mult=1

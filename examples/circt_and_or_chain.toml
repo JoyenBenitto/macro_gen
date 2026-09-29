@@ -1,7 +1,6 @@
 # Smallest CIRCT-driven example: `y = (a AND b) OR c` from
-# examples/circt/and_or_chain.mlir, sized via logical effort (no custom
-# cells). Same PDK settings as examples/130nm.toml -- adjust
-# environment.include_path to your local PDK install before running.
+# examples/circt/and_or_chain.mlir, imported into the netlist IR and run
+# through the pass pipeline. Same PDK settings as examples/130nm.toml.
 #
 # Requires macro_gen built with `--features circt` and CIRCT_DIR set; see
 # docs/src for CIRCT setup instructions.
@@ -32,6 +31,5 @@ wl_sweep_sample_count = 10
 mlir_path = "examples/circt/and_or_chain.mlir"
 top_module = "and_or_chain"
 
-# No [custom_cells] section: this fixture has no gate tagged for the
-# custom/analytical (sweep-based) flow -- everything is sized via logical
-# effort.
+# Custom cells are selected in the MLIR itself: and_or_chain.mlir tags its
+# hw.module with `macro_gen.cell = "complex"`.

@@ -1,7 +1,8 @@
 //! `macro_gen` is an automated digital IC macro generator.
 //!
-//! It drives ngspice in-process via FFI to characterize and size cells (starting
-//! with an inverter) against a PDK-supplied config, then emits a spice deck.
+//! It drives ngspice in-process via FFI to characterize and size a reference
+//! inverter against a PDK-supplied config, and (feature `circt`) imports CIRCT
+//! `hw`+`comb` IR into a hypergraph netlist IR run through a pass pipeline.
 //!
 //! See the [usage guide](https://joyenbenitto.github.io/macro_gen/) for CLI usage;
 //! this rustdoc reference covers the internal module structure.
@@ -10,10 +11,13 @@ mod characterization;
 #[cfg(feature = "circt")]
 mod circt_ffi;
 mod config;
+// The IR is an API for passes to build on; not every entry point has a
+// caller yet, and without `circt` nothing drives it at all.
+#[allow(dead_code, unused_imports)]
 mod ir;
-mod sizing;
-#[cfg(feature = "circt")]
-mod spice_gen;
+// Only driven by the CIRCT flow today.
+#[cfg_attr(not(feature = "circt"), allow(dead_code))]
+mod passes;
 mod validator;
 
 use characterization::device_params::SymbolTable;
@@ -76,18 +80,11 @@ fn print_run_summary(elapsed: std::time::Duration) {
     info!("=======================================================");
 }
 
-/// Parses `config.circt`'s MLIR input, sizes every gate in its top module
-/// (logical effort by default, the custom/analytical flow for anything
-/// tagged in `config.custom_cells`), and emits a SPICE deck. Keeps the
-/// non-CIRCT flow in `main` completely untouched -- `examples/130nm.toml`
-/// (no `[circt]` section) never reaches this function.
+/// Parses `config.circt`'s MLIR input into the netlist IR, sets the top
+/// module, and runs the pass pipeline over it. Needs no ngspice session or
+/// PDK. `examples/130nm.toml` (no `[circt]` section) never reaches this.
 #[cfg(feature = "circt")]
-fn run_circt_flow(
-    config: &Config,
-    build_dir: &std::path::Path,
-    symbols: &SymbolTable,
-    session: &NgspiceSession,
-) -> Result<(), ExitCode> {
+fn run_circt_flow(config: &Config) -> Result<(), ExitCode> {
     let circt_cfg = config.circt.as_ref().expect("checked by caller");
 
     let ctx = circt_ffi::CirctContext::new();
@@ -98,33 +95,24 @@ fn run_circt_flow(
             ExitCode::FAILURE
         })?;
 
-    let netlist = ir::from_circt::build_netlist(&mlir_module).map_err(|e| {
+    let mut design = ir::from_circt::build_design(&mlir_module).map_err(|e| {
         error!("Failed to build netlist from CIRCT IR: {}", e);
         ExitCode::FAILURE
     })?;
-    println!("CIRCT netlist: {:#?}", netlist);
+    let top = design.module_by_name(&circt_cfg.top_module).ok_or_else(|| {
+        error!("Top module '{}' not found in '{}'", circt_cfg.top_module, circt_cfg.mlir_path);
+        ExitCode::FAILURE
+    })?;
+    design.set_top(top);
 
-    let sized = sizing::size_netlist(&netlist, config, build_dir, symbols, session).map_err(|e| {
-        error!("Failed to size netlist: {}", e);
+    let mut pipeline = passes::default_pipeline();
+    info!("Pass pipeline: {}", pipeline.pass_names().join(", "));
+    pipeline.run(&mut design).map_err(|e| {
+        error!("{}", e);
         ExitCode::FAILURE
     })?;
 
-    let layout = characterization::paths::BuildLayout::new(build_dir).map_err(|e| {
-        error!("Failed to set up build output directories: {}", e);
-        ExitCode::FAILURE
-    })?;
-
-    let out_path = spice_gen::emit_netlist(&sized, config, &layout).map_err(|e| {
-        error!("Failed to emit SPICE netlist: {}", e);
-        ExitCode::FAILURE
-    })?;
-
-    info!(
-        "Sized {} gate instance(s) in '{}'; wrote SPICE deck to {}",
-        sized.sizing.len(),
-        circt_cfg.top_module,
-        out_path.display()
-    );
+    println!("CIRCT netlist: {:#?}", design);
     Ok(())
 }
 
@@ -188,6 +176,15 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    #[cfg(feature = "circt")]
+    if config.circt.is_some() {
+        if let Err(code) = run_circt_flow(&config) {
+            return code;
+        }
+        print_run_summary(start.elapsed());
+        return ExitCode::SUCCESS;
+    }
+
     let build_dir = args.build_dir.as_path();
 
     let session = match NgspiceSession::start() {
@@ -207,16 +204,6 @@ fn main() -> ExitCode {
     };
     let symbols = SymbolTable::from_device_params(&device_params);
 
-    #[cfg(feature = "circt")]
-    {
-        if config.circt.is_some() {
-            if let Err(code) = run_circt_flow(&config, build_dir, &symbols, &session) {
-                return code;
-            }
-            print_run_summary(start.elapsed());
-            return ExitCode::SUCCESS;
-        }
-    }
     match inverter::generate_deck(&config, build_dir, &symbols, &session) {
         Ok((wn, wp)) => {
             info!("Reference inverter sized: Wn={:.4}um, Wp={:.4}um", wn, wp);

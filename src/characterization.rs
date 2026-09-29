@@ -5,7 +5,6 @@
 //! reference inverter, `normalize` post-processes sweep results, and `paths` resolves
 //! the output directory layout under a run's build directory.
 
-pub mod custom_sizing;
 pub mod device_params;
 pub mod inverter;
 pub mod ngspice_ffi;

@@ -1,5 +1,0 @@
-{# Static CMOS NAND2: 2 parallel PMOS pull-up, 2 series NMOS pull-down. #}
-XMPA{{ instance_name }} {{ out_net }} {{ in_nets[0] }} VDD VDD {{ model_pmos }} L={{ lp }} W={{ wp }} nf=1 mult=1
-XMPB{{ instance_name }} {{ out_net }} {{ in_nets[1] }} VDD VDD {{ model_pmos }} L={{ lp }} W={{ wp }} nf=1 mult=1
-XMNA{{ instance_name }} {{ out_net }} {{ in_nets[0] }} n_{{ instance_name }}_stack GND {{ model_nmos }} L={{ ln }} W={{ wn }} nf=1 mult=1
-XMNB{{ instance_name }} n_{{ instance_name }}_stack {{ in_nets[1] }} GND GND {{ model_nmos }} L={{ ln }} W={{ wn }} nf=1 mult=1
